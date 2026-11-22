@@ -1,13 +1,13 @@
-# Gift Tracker — Material 3 Expressive
+# Gift Tracker — Material 3 Expressive (Web + Native Android)
 
-A cross-device Gift Tracking suite built around **Android 16's Material 3 Expressive** design language and real-time **Google Firebase (Cloud Firestore + Auth)** synchronization.
+A cross-device Gift Tracking suite built around **Android 16's Material 3 Expressive** design language, **Jetpack Glance Home Screen Widgets**, and real-time **Google Firebase (Cloud Firestore + Auth)** synchronization.
 
 ## Repository Structure
 
 ```text
 gift-tracker/
+├── android/                  # Native Android App (Kotlin, Jetpack Compose M3 Expressive 1.5, Glance Widget)
 ├── web/                      # Next.js 16 Progressive Web App (Desktop, Android, iOS)
-├── android/                  # Native Android Client (Kotlin + Jetpack Compose)
 ├── firestore.rules           # Shared Cloud Firestore security rules (UID-scoped)
 ├── firestore.indexes.json    # Shared Cloud Firestore composite indexes
 └── firebase.json             # Firebase CLI configuration
@@ -15,20 +15,27 @@ gift-tracker/
 
 ## Highlights
 
-- **Material 3 Expressive UI**:
-  - 4 Material You Dynamic Color seed palettes (*Festive Terracotta*, *Botanical Sage*, *Sunlit Ochre*, *Pacific Teal*) in Dark, Light, and System modes.
-  - Sinusoidal wavy `ExpressiveProgress` budget indicators, shape-morphing connected status button groups (`Bought` · `Arrived` · `Wrapped`), split action buttons, and geometric recipient avatars.
-- **Auto-Adaptive Responsive Layouts**:
-  - **Compact (`< 640px` Phone)**: Thumb-friendly Horizontal Floating Toolbar paired with a Vibrant Primary FAB and spring-animated bottom sheets.
-  - **Medium (`640px–1079px` Foldables & Tablets)**: Collapsed Navigation Rail + 2-pane split layouts respecting `horizontal-viewport-segments` foldable hinges.
-  - **Expanded (`>= 1080px` Laptop & Desktop)**: Expanded Navigation Drawer with live item badges + Canonical Supporting-Pane & List-Detail layouts.
-- **Privacy-First Architecture**:
-  - Zero hardcoded personal data. Clean empty slate on first run, ready for your own custom recipients, events, budgets, clothing sizes, and wishlists.
-- **Native Share Target**:
-  - Share product URLs directly from Chrome, Amazon, Target, Etsy, Cotopaxi, or Hot Topic into **Gift Tracker** to auto-extract store, title, and price.
+- **Native Android App (`/android`)**:
+  - First-party **Jetpack Compose Material 3 Expressive (`1.5.0`)**: `MaterialExpressiveTheme`, `MotionScheme.expressive()` spring physics, Android Wallpaper Dynamic Color, `HorizontalFloatingToolbar` + `VibrantFloatingActionButton`, `LinearWavyProgressIndicator`, connected `ButtonGroup` status toggles with system haptics, `SplitButtonLayout`, and `MaterialShapes` avatars.
+  - **Material 3 Home Screen Widget (`androidx.glance`)**: Resizable `GlanceTheme` widget showing active occasion budget progress, `to buy` / `to wrap` counts, remaining checklist items, and a `+ Gift` quick-add button.
+  - **Android OS Integrations**: Native Share Sheet target (`ACTION_SEND`), Storage Access Framework JSON Export/Import, Credential Manager Google Sign-In, Edge-to-Edge, and Predictive Back.
+- **Progressive Web App (`/web`)**:
+  - Auto-adaptive Material 3 Expressive web interface for laptops, desktops, foldables, and mobile browsers.
+  - Zero hardcoded personal data — clean privacy-first architecture out of the box.
+- **Unified Real-Time Cloud Sync**:
+  - Both apps share the exact same Firestore workspace schema (`workspaces/{uid}/{people|events|gifts|wishes}`) and interchangeable JSON backup format.
 
-## Quick Start (Web App)
+## Quick Start
 
+### Native Android App
+```bash
+cd android
+./gradlew assembleRelease
+# Installable APK: android/app/build/outputs/apk/release/app-release.apk
+```
+*(Pre-built APKs are also attached to GitHub Releases and every GitHub Actions CI run!)*
+
+### Web App
 ```bash
 cd web
 npm install
@@ -39,7 +46,5 @@ npm run dev
 
 1. Create a free Firebase project at [console.firebase.google.com](https://console.firebase.google.com/).
 2. Enable **Authentication → Google** (and/or Anonymous) and **Firestore Database** (deploy root `firestore.rules` to lock access to your UID).
-3. Copy your Web App `firebaseConfig` snippet and either:
-   - Open **Settings** (gear icon) in the app and paste it directly, **or**
-   - Copy `web/.env.example` to `web/.env.local` and fill in `NEXT_PUBLIC_FIREBASE_*`.
-4. If deploying via **Firebase App Hosting**, set the backend **App root directory** to `web`.
+3. In **Settings** (gear icon) on either Android or Web, paste your `firebaseConfig` snippet (or place `google-services.json` in `android/app/` and `.env.local` in `web/`).
+4. If deploying the Web App via **Firebase App Hosting**, set the backend **App root directory** to `web`.

@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Gift Tracker</string>
+    <string name="widget_name">Gift Tracker Checklist</string>
+    <string name="widget_description">Track upcoming event budgets, gifts left to buy or wrap, and quickly add new gift ideas.</string>
+</resources>
