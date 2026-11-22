@@ -117,32 +117,27 @@ class FirebaseSyncManager(private val appContext: Context) {
         val credentialManager = CredentialManager.create(activityContext)
         val trimmedClientId = webClientId.trim()
 
-        // 1. First attempt: GetSignInWithGoogleOption (standard for explicit "Sign in with Google" button clicks)
-        val result = runCatching {
-            val signInOption = com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption.Builder(trimmedClientId)
-                .build()
-            val request = GetCredentialRequest.Builder()
-                .addCredentialOption(signInOption)
-                .build()
+        val signInOption = com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption.Builder(trimmedClientId)
+            .build()
+        val request = GetCredentialRequest.Builder()
+            .addCredentialOption(signInOption)
+            .build()
+
+        val result = try {
             credentialManager.getCredential(
                 request = request,
                 context = activityContext
             )
-        }.recoverCatching { err ->
-            // 2. Fallback attempt: GetGoogleIdOption (alternative flow with filterByAuthorizedAccounts = false)
-            val googleIdOption = GetGoogleIdOption.Builder()
-                .setFilterByAuthorizedAccounts(false)
-                .setServerClientId(trimmedClientId)
-                .setAutoSelectEnabled(false)
-                .build()
-            val request = GetCredentialRequest.Builder()
-                .addCredentialOption(googleIdOption)
-                .build()
-            credentialManager.getCredential(
-                request = request,
-                context = activityContext
+        } catch (e: androidx.credentials.exceptions.GetCredentialCancellationException) {
+            val sha1 = getAppSigningSha1(activityContext)
+            val shaHint = if (sha1 != null) " (Installed APK SHA-1: $sha1)" else ""
+            throw IllegalStateException(
+                "Sign-in canceled or rejected by Google Play Services. If you selected an account, verify your Firebase SHA-1 & OAuth consent screen$shaHint.",
+                e
             )
-        }.getOrThrow()
+        } catch (e: androidx.credentials.exceptions.GetCredentialException) {
+            throw IllegalStateException("${e.type}: ${e.errorMessage ?: e.localizedMessage}", e)
+        }
 
         val credential = result.credential
         if (credential is CustomCredential &&
@@ -301,6 +296,22 @@ class FirebaseSyncManager(private val appContext: Context) {
     }
 
     companion object {
+        /**
+         * Returns the colon-separated uppercase SHA-1 fingerprint of the installed APK's signing certificate.
+         */
+        fun getAppSigningSha1(context: Context): String? = runCatching {
+            val pm = context.packageManager
+            val pkgInfo = pm.getPackageInfo(
+                context.packageName,
+                android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES
+            )
+            val signer = pkgInfo.signingInfo?.apkContentsSigners?.firstOrNull()
+                ?: pkgInfo.signingInfo?.signingCertificateHistory?.firstOrNull()
+                ?: return null
+            val digest = java.security.MessageDigest.getInstance("SHA-1").digest(signer.toByteArray())
+            digest.joinToString(":") { "%02X".format(it) }
+        }.getOrNull()
+
         /**
          * Parses EITHER:
          * 1. Web JS/JSON firebaseConfig snippet (`apiKey`, `projectId`, `appId`, optional `webClientId`), OR
