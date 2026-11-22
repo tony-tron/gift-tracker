@@ -115,20 +115,34 @@ class FirebaseSyncManager(private val appContext: Context) {
         webClientId: String
     ): FirebaseUser {
         val credentialManager = CredentialManager.create(activityContext)
-        val googleIdOption = GetGoogleIdOption.Builder()
-            .setFilterByAuthorizedAccounts(false)
-            .setServerClientId(webClientId.trim())
-            .setAutoSelectEnabled(false)
-            .build()
+        val trimmedClientId = webClientId.trim()
 
-        val request = GetCredentialRequest.Builder()
-            .addCredentialOption(googleIdOption)
-            .build()
-
-        val result = credentialManager.getCredential(
-            request = request,
-            context = activityContext
-        )
+        // 1. First attempt: GetSignInWithGoogleOption (standard for explicit "Sign in with Google" button clicks)
+        val result = runCatching {
+            val signInOption = com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption.Builder(trimmedClientId)
+                .build()
+            val request = GetCredentialRequest.Builder()
+                .addCredentialOption(signInOption)
+                .build()
+            credentialManager.getCredential(
+                request = request,
+                context = activityContext
+            )
+        }.recoverCatching { err ->
+            // 2. Fallback attempt: GetGoogleIdOption (alternative flow with filterByAuthorizedAccounts = false)
+            val googleIdOption = GetGoogleIdOption.Builder()
+                .setFilterByAuthorizedAccounts(false)
+                .setServerClientId(trimmedClientId)
+                .setAutoSelectEnabled(false)
+                .build()
+            val request = GetCredentialRequest.Builder()
+                .addCredentialOption(googleIdOption)
+                .build()
+            credentialManager.getCredential(
+                request = request,
+                context = activityContext
+            )
+        }.getOrThrow()
 
         val credential = result.credential
         if (credential is CustomCredential &&
@@ -139,7 +153,7 @@ class FirebaseSyncManager(private val appContext: Context) {
             val authResult = FirebaseAuth.getInstance(app).signInWithCredential(firebaseCred).await()
             return authResult.user ?: error("Google Sign-In returned null FirebaseUser")
         } else {
-            error("Unexpected credential type returned by Credential Manager")
+            error("Unexpected credential type returned by Credential Manager: ${credential::class.java.simpleName}")
         }
     }
 
@@ -304,7 +318,12 @@ class FirebaseSyncManager(private val appContext: Context) {
                     val projectId = pInfo["project_id"]?.jsonPrimitive?.content ?: return@runCatching
                     val bucket = pInfo["storage_bucket"]?.jsonPrimitive?.content
                     val sender = pInfo["project_number"]?.jsonPrimitive?.content
-                    val client = root["client"]!!.jsonArray.firstOrNull()?.jsonObject ?: return@runCatching
+                    val clients = root["client"]!!.jsonArray.mapNotNull { it.jsonObject }
+                    val client = clients.firstOrNull {
+                        it["client_info"]?.jsonObject?.get("android_client_info")?.jsonObject
+                            ?.get("package_name")?.jsonPrimitive?.content == "com.tonytron.gifttracker"
+                    } ?: clients.firstOrNull() ?: return@runCatching
+
                     val appId = client["client_info"]?.jsonObject?.get("mobilesdk_app_id")?.jsonPrimitive?.content
                         ?: return@runCatching
                     val apiKey = client["api_key"]?.jsonArray?.firstOrNull()?.jsonObject
@@ -314,6 +333,9 @@ class FirebaseSyncManager(private val appContext: Context) {
                         ?.mapNotNull { it.jsonObject }
                         ?.firstOrNull { it["client_type"]?.jsonPrimitive?.content == "3" }
                         ?.get("client_id")?.jsonPrimitive?.content
+                        ?: clients.flatMap { it["oauth_client"]?.jsonArray?.mapNotNull { oc -> oc.jsonObject } ?: emptyList() }
+                            .firstOrNull { it["client_type"]?.jsonPrimitive?.content == "3" }
+                            ?.get("client_id")?.jsonPrimitive?.content
 
                     return FirebaseRuntimeConfig(
                         apiKey = apiKey,
