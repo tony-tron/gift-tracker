@@ -29,6 +29,8 @@ import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.FloatingToolbarDefaults
 import androidx.compose.material3.HorizontalFloatingToolbar
 import androidx.compose.material3.Icon
@@ -142,12 +144,15 @@ fun GiftTrackerRoot(
                     modifier = Modifier.fillMaxHeight(),
                     containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
                     header = {
-                        FloatingToolbarDefaults.VibrantFloatingActionButton(
+                        FloatingActionButton(
                             onClick = {
                                 haptics.performHapticFeedback(HapticFeedbackType.Confirm)
                                 viewModel.openNewGiftComposer()
                             },
-                            modifier = Modifier.padding(top = 12.dp, bottom = 8.dp)
+                            modifier = Modifier.padding(top = 12.dp, bottom = 8.dp),
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary,
+                            elevation = FloatingActionButtonDefaults.bottomAppBarFabElevation()
                         ) {
                             Icon(Icons.Rounded.Add, contentDescription = "Add Gift or Idea")
                         }

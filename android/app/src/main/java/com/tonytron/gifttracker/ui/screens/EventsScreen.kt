@@ -209,7 +209,10 @@ fun EventsScreen(
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         Text("Create New Occasion", fontWeight = FontWeight.Bold)
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(
+                            modifier = Modifier.horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
                             listOf(
                                 "Christmas" to "🎄",
                                 "Birthday" to "🎂",
