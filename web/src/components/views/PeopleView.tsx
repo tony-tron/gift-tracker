@@ -35,7 +35,6 @@ export function PeopleView({
     setSelectedPersonId,
     updatePerson,
     moveGiftToEvent,
-    postureSim,
   } = useGiftStore();
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -108,15 +107,13 @@ export function PeopleView({
     };
   }, [activePerson, gifts, eventMap]);
 
-  const isForcePhone = postureSim === 'phone';
-
   return (
     <div className="canonical-list-detail">
       {/* LEFT PANE: Searchable Recipient Directory */}
       <div
         className={mobileDetailOpen ? 'people-master-pane mobile-hidden' : 'people-master-pane'}
         style={{
-          display: mobileDetailOpen && isForcePhone ? 'none' : 'flex',
+          display: 'flex',
           flexDirection: 'column',
           gap: '12px',
           minWidth: 0,
@@ -253,7 +250,7 @@ export function PeopleView({
         <div
           className={!mobileDetailOpen ? 'people-detail-pane mobile-closed' : 'people-detail-pane'}
           style={{
-            display: !mobileDetailOpen && isForcePhone ? 'none' : 'flex',
+            display: 'flex',
             flexDirection: 'column',
             gap: '16px',
             minWidth: 0,
@@ -266,7 +263,6 @@ export function PeopleView({
             className="m3-btn-tonal mobile-back-pill"
             style={{
               alignSelf: 'flex-start',
-              display: isForcePhone ? 'inline-flex' : undefined,
             }}
           >
             <ArrowLeft size={15} /> All People

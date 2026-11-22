@@ -49,8 +49,6 @@ export type SyncStatus =
   | 'synced'
   | 'error';
 
-export type PostureSimulation = 'auto' | 'phone' | 'foldable' | 'laptop';
-
 export interface SnackbarMessage {
   id: string;
   text: string;
@@ -72,13 +70,11 @@ interface GiftStoreContextValue {
   selectedPersonId: string | null;
   setSelectedPersonId: (id: string | null) => void;
 
-  // Material You Expressive Theme & Adaptive Simulation
+  // Material You Expressive Theme
   themeSeed: ThemeSeed;
   setThemeSeed: (seed: ThemeSeed) => void;
   colorMode: ColorMode;
   setColorMode: (mode: ColorMode) => void;
-  postureSim: PostureSimulation;
-  setPostureSim: (sim: PostureSimulation) => void;
 
   // Firebase Cloud Sync
   syncStatus: SyncStatus;
@@ -119,8 +115,8 @@ interface GiftStoreContextValue {
   updateWish: (id: string, patch: Partial<WishItem>) => void;
   deleteWish: (id: string) => void;
 
-  // Sheet Reset & Backup
-  resetToGoogleSheetData: () => void;
+  // Reset & Backup
+  resetData: () => void;
   exportJsonBackup: () => string;
   importJsonBackup: (raw: string) => boolean;
 
@@ -202,7 +198,6 @@ export function GiftStoreProvider({ children }: { children: React.ReactNode }) {
 
   const [themeSeed, setThemeSeed] = useState<ThemeSeed>(() => readInitialTheme().seed);
   const [colorMode, setColorMode] = useState<ColorMode>(() => readInitialTheme().mode);
-  const [postureSim, setPostureSim] = useState<PostureSimulation>('auto');
 
   const [firebaseConfig, setFirebaseConfig] = useState<FirebaseClientConfig | null>(() =>
     getSavedFirebaseConfig()
@@ -732,7 +727,7 @@ export function GiftStoreProvider({ children }: { children: React.ReactNode }) {
   );
 
   // Reset to clean slate
-  const resetToGoogleSheetData = useCallback(() => {
+  const resetData = useCallback(() => {
     setDataset(EMPTY_DATASET);
     if (typeof window !== 'undefined') {
       window.localStorage.setItem(LOCAL_DATA_KEY, JSON.stringify(EMPTY_DATASET));
@@ -795,8 +790,6 @@ export function GiftStoreProvider({ children }: { children: React.ReactNode }) {
       setThemeSeed,
       colorMode,
       setColorMode,
-      postureSim,
-      setPostureSim,
       syncStatus,
       syncError,
       firebaseUser,
@@ -821,7 +814,7 @@ export function GiftStoreProvider({ children }: { children: React.ReactNode }) {
       addWish,
       updateWish,
       deleteWish,
-      resetToGoogleSheetData,
+      resetData,
       exportJsonBackup,
       importJsonBackup,
       snackbar,
@@ -835,7 +828,6 @@ export function GiftStoreProvider({ children }: { children: React.ReactNode }) {
       selectedPersonId,
       themeSeed,
       colorMode,
-      postureSim,
       syncStatus,
       syncError,
       firebaseUser,
@@ -860,7 +852,7 @@ export function GiftStoreProvider({ children }: { children: React.ReactNode }) {
       addWish,
       updateWish,
       deleteWish,
-      resetToGoogleSheetData,
+      resetData,
       exportJsonBackup,
       importJsonBackup,
       snackbar,

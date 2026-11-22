@@ -378,16 +378,8 @@ a {
 }
 
 /* ==========================================================================
-   Adaptive Navigation Suite Scaffold (Phone / Foldable / Googlebook Laptop)
+   Adaptive Navigation Suite Scaffold (Phone / Foldable / Laptop)
    ========================================================================== */
-
-.app-outer-stage {
-  min-height: 100dvh;
-  width: 100%;
-  display: flex;
-  justify-content: center;
-  background: var(--md-surface-dim);
-}
 
 .app-shell {
   width: 100%;
@@ -396,57 +388,6 @@ a {
   display: flex;
   flex-direction: column;
   position: relative;
-}
-
-/* Posture simulation containers when testing Phone or Foldable on a wider screen */
-.app-outer-stage[data-posture='phone'] {
-  padding: 16px;
-}
-.app-outer-stage[data-posture='phone'] .app-shell {
-  max-width: 412px;
-  min-height: calc(100dvh - 32px);
-  max-height: 915px;
-  border-radius: 40px;
-  overflow: hidden;
-  box-shadow: var(--md-elevation-3);
-  border: 6px solid var(--md-surface-container-highest);
-}
-
-.app-outer-stage[data-posture='foldable'] {
-  padding: 16px;
-}
-.app-outer-stage[data-posture='foldable'] .app-shell {
-  max-width: 840px;
-  min-height: calc(100dvh - 32px);
-  max-height: 880px;
-  border-radius: 32px;
-  overflow: hidden;
-  box-shadow: var(--md-elevation-3);
-  border: 6px solid var(--md-surface-container-highest);
-}
-
-/* Foldable subtle vertical crease indicator when in foldable simulation */
-.foldable-hinge-indicator {
-  display: none;
-}
-.app-outer-stage[data-posture='foldable'] .foldable-hinge-indicator {
-  display: block;
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 50%;
-  width: 2px;
-  transform: translateX(-50%);
-  background: linear-gradient(
-    to bottom,
-    transparent,
-    var(--md-outline-variant) 15%,
-    var(--md-outline-variant) 85%,
-    transparent
-  );
-  opacity: 0.45;
-  pointer-events: none;
-  z-index: 45;
 }
 
 /* Navigation Rail (Hidden on Compact Phone, visible on Medium Foldable & Expanded Laptop) */
@@ -465,15 +406,6 @@ a {
   align-items: center;
   gap: 10px;
   max-width: calc(100% - 24px);
-}
-
-.app-outer-stage[data-posture='phone'] .m3-bottom-dock {
-  position: sticky;
-  bottom: 14px;
-  left: 0;
-  transform: none;
-  margin: 0 auto;
-  justify-content: center;
 }
 
 .m3-floating-toolbar {
@@ -566,19 +498,19 @@ a {
    ========================================================================== */
 
 @media (min-width: 640px), (max-height: 500px) and (orientation: landscape) {
-  .app-outer-stage:not([data-posture='phone']) .app-shell {
+  .app-shell {
     flex-direction: row;
   }
 
-  .app-outer-stage:not([data-posture='phone']) .m3-bottom-dock {
+  .m3-bottom-dock {
     display: none;
   }
 
-  .app-outer-stage:not([data-posture='phone']) .m3-workspace {
+  .m3-workspace {
     padding-bottom: 32px;
   }
 
-  .app-outer-stage:not([data-posture='phone']) .m3-nav-rail {
+  .m3-nav-rail {
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -592,41 +524,15 @@ a {
     z-index: 30;
     gap: 18px;
   }
-
-  .app-outer-stage[data-posture='foldable'] .m3-nav-rail {
-    height: auto;
-    min-height: 100%;
-  }
 }
 
-/* Expanded Window Size Class (>= 1080px — Googlebook Android Laptop & Desktop) */
+/* Expanded Window Size Class (>= 1080px — Laptop & Desktop) */
 @media (min-width: 1080px) {
-  .app-outer-stage[data-posture='auto'] .m3-nav-rail,
-  .app-outer-stage[data-posture='laptop'] .m3-nav-rail {
+  .m3-nav-rail {
     width: 248px;
     align-items: stretch;
     padding: 24px 16px;
   }
-}
-
-/* Force Laptop layout when posture='laptop' */
-.app-outer-stage[data-posture='laptop'] .app-shell {
-  flex-direction: row;
-}
-.app-outer-stage[data-posture='laptop'] .m3-bottom-dock {
-  display: none;
-}
-.app-outer-stage[data-posture='laptop'] .m3-nav-rail {
-  display: flex;
-  flex-direction: column;
-  width: 248px;
-  align-items: stretch;
-  padding: 24px 16px;
-  background: var(--md-surface-container-low);
-  position: sticky;
-  top: 0;
-  height: 100dvh;
-  gap: 18px;
 }
 
 /* Navigation Rail Items */
@@ -727,18 +633,15 @@ a {
 }
 
 @media (min-width: 1080px) {
-  .app-outer-stage[data-posture='auto'] .rail-brand-text,
-  .app-outer-stage[data-posture='laptop'] .rail-brand-text {
+  .rail-brand-text {
     display: block;
   }
 
-  .app-outer-stage[data-posture='auto'] .rail-fab-label,
-  .app-outer-stage[data-posture='laptop'] .rail-fab-label {
+  .rail-fab-label {
     display: inline;
   }
 
-  .app-outer-stage[data-posture='auto'] .rail-item,
-  .app-outer-stage[data-posture='laptop'] .rail-item {
+  .rail-item {
     flex-direction: row;
     align-items: center;
     gap: 12px;
@@ -748,26 +651,22 @@ a {
     font-size: 14px;
   }
 
-  .app-outer-stage[data-posture='auto'] .rail-icon-pill,
-  .app-outer-stage[data-posture='laptop'] .rail-icon-pill {
+  .rail-icon-pill {
     width: auto;
     height: auto;
     background: transparent !important;
   }
 
-  .app-outer-stage[data-posture='auto'] .rail-item:hover,
-  .app-outer-stage[data-posture='laptop'] .rail-item:hover {
+  .rail-item:hover {
     background: var(--md-surface-container);
   }
 
-  .app-outer-stage[data-posture='auto'] .rail-item[data-active='true'],
-  .app-outer-stage[data-posture='laptop'] .rail-item[data-active='true'] {
+  .rail-item[data-active='true'] {
     background: var(--md-primary-container);
     color: var(--md-on-primary-container);
   }
 
-  .app-outer-stage[data-posture='auto'] .rail-badge,
-  .app-outer-stage[data-posture='laptop'] .rail-badge {
+  .rail-badge {
     display: inline-flex;
     margin-left: auto;
     font-size: 12px;
@@ -777,37 +676,6 @@ a {
   }
 }
 
-.app-outer-stage[data-posture='laptop'] .rail-brand-text {
-  display: block;
-}
-.app-outer-stage[data-posture='laptop'] .rail-fab-label {
-  display: inline;
-}
-.app-outer-stage[data-posture='laptop'] .rail-item {
-  flex-direction: row;
-  align-items: center;
-  gap: 12px;
-  height: 52px;
-  padding: 0 16px;
-  border-radius: var(--radius-pill);
-  font-size: 14px;
-}
-.app-outer-stage[data-posture='laptop'] .rail-icon-pill {
-  width: auto;
-  height: auto;
-  background: transparent !important;
-}
-.app-outer-stage[data-posture='laptop'] .rail-item[data-active='true'] {
-  background: var(--md-primary-container);
-  color: var(--md-on-primary-container);
-}
-.app-outer-stage[data-posture='laptop'] .rail-badge {
-  display: inline-flex;
-  margin-left: auto;
-  font-size: 12px;
-  font-weight: 700;
-}
-
 /* ==========================================================================
    Canonical Adaptive Panes (Supporting Pane & List-Detail Split)
    ========================================================================== */
@@ -815,7 +683,7 @@ a {
 .m3-page-header {
   padding: 20px 20px 12px;
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   justify-content: space-between;
   gap: 14px;
@@ -849,7 +717,7 @@ a {
 }
 
 @media (min-width: 920px) {
-  .app-outer-stage:not([data-posture='phone']) .canonical-supporting-layout {
+  .canonical-supporting-layout {
     grid-template-columns: minmax(0, 1.55fr) minmax(300px, 0.95fr);
     gap: 24px;
   }
@@ -864,11 +732,6 @@ a {
   }
 }
 
-.app-outer-stage[data-posture='foldable'] .canonical-supporting-layout {
-  grid-template-columns: 1fr 1fr;
-  column-gap: 28px;
-}
-
 /* Canonical List-Detail Split (People & Sizes page) */
 .canonical-list-detail {
   display: grid;
@@ -878,15 +741,10 @@ a {
 }
 
 @media (min-width: 760px) {
-  .app-outer-stage:not([data-posture='phone']) .canonical-list-detail {
+  .canonical-list-detail {
     grid-template-columns: minmax(270px, 0.88fr) minmax(0, 1.35fr);
     gap: 24px;
   }
-}
-
-.app-outer-stage[data-posture='foldable'] .canonical-list-detail {
-  grid-template-columns: 1fr 1fr;
-  column-gap: 28px;
 }
 
 /* ==========================================================================
@@ -1369,14 +1227,13 @@ a {
 }
 
 @media (min-width: 720px) {
-  .app-outer-stage:not([data-posture='phone']) .ideas-grid {
+  .ideas-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
 @media (min-width: 1240px) {
-  .app-outer-stage[data-posture='auto'] .ideas-grid,
-  .app-outer-stage[data-posture='laptop'] .ideas-grid {
+  .ideas-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }

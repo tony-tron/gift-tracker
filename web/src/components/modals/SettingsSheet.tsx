@@ -5,24 +5,23 @@ import {
   Check,
   Cloud,
   CloudUpload,
+  Database,
   Download,
-  Laptop,
   LogIn,
   LogOut,
   Moon,
   Palette,
-  RefreshCw,
-  Smartphone,
+  Settings,
   Sun,
-  Tablet,
+  Trash2,
   Upload,
   X,
 } from 'lucide-react';
-import { useGiftStore, type PostureSimulation } from '@/context/GiftStoreContext';
+import { useGiftStore } from '@/context/GiftStoreContext';
 import { parseFirebaseSnippet } from '@/lib/firebase';
 import type { ColorMode, ThemeSeed } from '@/lib/types';
 
-interface CloudSyncSheetProps {
+interface SettingsSheetProps {
   open: boolean;
   onClose: () => void;
 }
@@ -34,14 +33,12 @@ const SEEDS: Array<{ id: ThemeSeed; name: string; swatch: string }> = [
   { id: 'ocean', name: 'Pacific Teal', swatch: '#3ab6cc' },
 ];
 
-export function CloudSyncSheet({ open, onClose }: CloudSyncSheetProps) {
+export function SettingsSheet({ open, onClose }: SettingsSheetProps) {
   const {
     themeSeed,
     setThemeSeed,
     colorMode,
     setColorMode,
-    postureSim,
-    setPostureSim,
     syncStatus,
     syncError,
     firebaseUser,
@@ -51,7 +48,7 @@ export function CloudSyncSheet({ open, onClose }: CloudSyncSheetProps) {
     loginAnonymousSync,
     logoutFirebase,
     pushLocalToCloud,
-    resetToGoogleSheetData,
+    resetData,
     exportJsonBackup,
     importJsonBackup,
   } = useGiftStore();
@@ -100,8 +97,8 @@ export function CloudSyncSheet({ open, onClose }: CloudSyncSheetProps) {
   };
 
   return (
-    <div className="m3-scrim" onClick={onClose} role="dialog" aria-modal="true">
-      <div className="m3-sheet" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '580px' }}>
+    <div className="m3-scrim" onClick={onClose} role="dialog" aria-modal="true" aria-label="Settings">
+      <div className="m3-sheet" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '560px' }}>
         <div className="m3-drag-handle" />
         <div
           style={{
@@ -111,16 +108,17 @@ export function CloudSyncSheet({ open, onClose }: CloudSyncSheetProps) {
             marginBottom: '18px',
           }}
         >
-          <h2 style={{ fontSize: '20px', fontWeight: 700 }}>
-            Material You & Firebase Sync
-          </h2>
-          <button type="button" onClick={onClose} className="m3-btn-icon" aria-label="Close">
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <Settings size={20} style={{ color: 'var(--md-primary)' }} />
+            <h2 style={{ fontSize: '20px', fontWeight: 700 }}>Settings</h2>
+          </div>
+          <button type="button" onClick={onClose} className="m3-btn-icon" aria-label="Close settings">
             <X size={18} />
           </button>
         </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
-          {/* 1. Material You Dynamic Color Studio */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          {/* 1. Appearance & Theme */}
           <section
             style={{
               background: 'var(--md-surface-container)',
@@ -133,7 +131,29 @@ export function CloudSyncSheet({ open, onClose }: CloudSyncSheetProps) {
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 700 }}>
               <Palette size={17} style={{ color: 'var(--md-primary)' }} />
-              <span>Material 3 Expressive Dynamic Color</span>
+              <span>Appearance</span>
+            </div>
+
+            {/* Light / Dark / System Connected Toggle */}
+            <div className="m3-connected-group">
+              {(
+                [
+                  { id: 'dark', label: 'Dark', icon: <Moon size={14} /> },
+                  { id: 'light', label: 'Light', icon: <Sun size={14} /> },
+                  { id: 'system', label: 'System', icon: <SparkleDot /> },
+                ] as Array<{ id: ColorMode; label: string; icon: React.ReactNode }>
+              ).map((m) => (
+                <button
+                  key={m.id}
+                  type="button"
+                  className="m3-segment-btn"
+                  data-kind="received"
+                  data-checked={colorMode === m.id}
+                  onClick={() => setColorMode(m.id)}
+                >
+                  {m.icon} {m.label}
+                </button>
+              ))}
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px' }}>
@@ -181,80 +201,9 @@ export function CloudSyncSheet({ open, onClose }: CloudSyncSheetProps) {
                 );
               })}
             </div>
-
-            {/* Light / Dark / System Connected Toggle */}
-            <div className="m3-connected-group">
-              {(
-                [
-                  { id: 'dark', label: 'Dark', icon: <Moon size={14} /> },
-                  { id: 'light', label: 'Light', icon: <Sun size={14} /> },
-                  { id: 'system', label: 'Auto', icon: <SparkleDot /> },
-                ] as Array<{ id: ColorMode; label: string; icon: React.ReactNode }>
-              ).map((m) => (
-                <button
-                  key={m.id}
-                  type="button"
-                  className="m3-segment-btn"
-                  data-kind="received"
-                  data-checked={colorMode === m.id}
-                  onClick={() => setColorMode(m.id)}
-                >
-                  {m.icon} {m.label}
-                </button>
-              ))}
-            </div>
           </section>
 
-          {/* 2. Adaptive Device Posture Preview */}
-          <section
-            style={{
-              background: 'var(--md-surface-container)',
-              padding: '16px',
-              borderRadius: '22px',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '10px',
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontWeight: 700, fontSize: '14px' }}>
-                Adaptive Window & Foldable Posture
-              </span>
-              <span style={{ fontSize: '11.5px', color: 'var(--md-on-surface-variant)' }}>
-                Auto-adapts on real hardware
-              </span>
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px' }}>
-              {(
-                [
-                  { id: 'auto', label: 'Auto', icon: null },
-                  { id: 'phone', label: 'Phone', icon: <Smartphone size={14} /> },
-                  { id: 'foldable', label: 'Foldable', icon: <Tablet size={14} /> },
-                  { id: 'laptop', label: 'Googlebook', icon: <Laptop size={14} /> },
-                ] as Array<{ id: PostureSimulation; label: string; icon: React.ReactNode }>
-              ).map((p) => {
-                const active = postureSim === p.id;
-                return (
-                  <button
-                    key={p.id}
-                    type="button"
-                    onClick={() => {
-                      setPostureSim(p.id);
-                      onClose();
-                    }}
-                    className="m3-chip"
-                    data-selected={active}
-                    style={{ justifyContent: 'center', padding: '0 8px', fontSize: '12px' }}
-                  >
-                    {p.icon}
-                    {p.label}
-                  </button>
-                );
-              })}
-            </div>
-          </section>
-
-          {/* 3. Firebase Cloud Firestore Sync */}
+          {/* 2. Firebase Cloud Sync */}
           <section
             style={{
               background: 'var(--md-surface-container)',
@@ -268,7 +217,7 @@ export function CloudSyncSheet({ open, onClose }: CloudSyncSheetProps) {
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 700 }}>
                 <Cloud size={17} style={{ color: 'var(--md-primary)' }} />
-                <span>Firebase Real-Time Sync</span>
+                <span>Cloud Sync</span>
               </div>
               <span
                 style={{
@@ -287,19 +236,19 @@ export function CloudSyncSheet({ open, onClose }: CloudSyncSheetProps) {
                 }}
               >
                 {syncStatus === 'synced'
-                  ? '● Cloud Synced'
+                  ? '● Synced'
                   : syncStatus === 'connecting'
                   ? 'Syncing...'
                   : syncStatus === 'signed-out'
-                  ? 'Ready to Sign In'
-                  : 'Offline-First Local'}
+                  ? 'Signed Out'
+                  : 'Local Only'}
               </span>
             </div>
 
             {firebaseConfig ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                 <p style={{ fontSize: '12.5px', color: 'var(--md-on-surface-variant)' }}>
-                  Connected Project: <strong>{firebaseConfig.projectId}</strong>
+                  Project: <strong>{firebaseConfig.projectId}</strong>
                   {firebaseUser && (
                     <>
                       {' '}
@@ -323,7 +272,7 @@ export function CloudSyncSheet({ open, onClose }: CloudSyncSheetProps) {
                       onClick={() => void loginAnonymousSync()}
                       className="m3-btn-tonal"
                     >
-                      Quick Anonymous Sync
+                      Anonymous Sync
                     </button>
                   </div>
                 ) : (
@@ -333,7 +282,7 @@ export function CloudSyncSheet({ open, onClose }: CloudSyncSheetProps) {
                       onClick={() => void pushLocalToCloud()}
                       className="m3-btn-tonal"
                     >
-                      <CloudUpload size={15} /> Force Push All Data
+                      <CloudUpload size={15} /> Push Local to Cloud
                     </button>
                     <button
                       type="button"
@@ -360,9 +309,8 @@ export function CloudSyncSheet({ open, onClose }: CloudSyncSheetProps) {
               </div>
             ) : (
               <p style={{ fontSize: '12.5px', color: 'var(--md-on-surface-variant)' }}>
-                Your Google Sheet data is already loaded and saved locally on this device! To sync live
-                between your Android phone and Googlebook, paste your Firebase Web App config below (or
-                set <code>.env.local</code>).
+                Data is saved locally on this device. To sync across Android and Web, paste your Firebase
+                Web App config below (or set <code>.env.local</code>).
               </p>
             )}
 
@@ -401,45 +349,60 @@ export function CloudSyncSheet({ open, onClose }: CloudSyncSheetProps) {
             )}
           </section>
 
-          {/* 4. Google Sheet Seed & JSON Backup */}
+          {/* 3. Data & Backup */}
           <section
             style={{
               background: 'var(--md-surface-container)',
               padding: '16px',
               borderRadius: '22px',
               display: 'flex',
-              flexWrap: 'wrap',
-              gap: '8px',
-              alignItems: 'center',
-              justifyContent: 'space-between',
+              flexDirection: 'column',
+              gap: '12px',
             }}
           >
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-              <button type="button" onClick={handleDownloadBackup} className="m3-btn-tonal">
-                <Download size={14} /> Export JSON
-              </button>
-              <label className="m3-btn-tonal" style={{ cursor: 'pointer' }}>
-                <Upload size={14} /> Import JSON
-                <input
-                  type="file"
-                  accept="application/json"
-                  onChange={handleUploadBackup}
-                  style={{ display: 'none' }}
-                />
-              </label>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 700 }}>
+              <Database size={17} style={{ color: 'var(--md-primary)' }} />
+              <span>Backup & Data</span>
             </div>
 
-            <button
-              type="button"
-              onClick={() => {
-                resetToGoogleSheetData();
-                onClose();
+            <div
+              style={{
+                display: 'flex',
+                flexWrap: 'wrap',
+                gap: '8px',
+                alignItems: 'center',
+                justifyContent: 'space-between',
               }}
-              className="m3-btn-tonal"
-              title="Restore original imported data from your Google Sheet"
             >
-              <RefreshCw size={14} /> Restore Sheet Import
-            </button>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                <button type="button" onClick={handleDownloadBackup} className="m3-btn-tonal">
+                  <Download size={14} /> Export JSON
+                </button>
+                <label className="m3-btn-tonal" style={{ cursor: 'pointer' }}>
+                  <Upload size={14} /> Import JSON
+                  <input
+                    type="file"
+                    accept="application/json"
+                    onChange={handleUploadBackup}
+                    style={{ display: 'none' }}
+                  />
+                </label>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  if (window.confirm('Clear all gifts, people, and wishlist items to start fresh?')) {
+                    resetData();
+                    onClose();
+                  }
+                }}
+                className="m3-btn-tonal"
+                title="Clear all data to a clean slate"
+              >
+                <Trash2 size={14} /> Reset Data
+              </button>
+            </div>
           </section>
         </div>
       </div>

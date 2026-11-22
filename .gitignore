@@ -1,8 +1,8 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
-
-# dependencies
-/node_modules
-/.pnp
+# ==========================================================================
+# Web (Next.js / Node.js)
+# ==========================================================================
+node_modules/
+.pnp
 .pnp.*
 .yarn/*
 !.yarn/patches
@@ -10,33 +10,47 @@
 !.yarn/releases
 !.yarn/versions
 
-# testing
-/coverage
+coverage/
+.next/
+out/
+web/build/
 
-# next.js
-/.next/
-/out/
+# Env files (keep templates tracked)
+.env*
+!.env.example
+!web/.env.example
 
-# production
-/build
+.vercel
+*.tsbuildinfo
+next-env.d.ts
 
-# misc
-.DS_Store
-*.pem
-
-# debug
+# Debug logs
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
+firebase-debug.log*
 
-# env files (can opt-in for committing if needed)
-.env*
-!.env.example
+# ==========================================================================
+# Native Android (Gradle / Android Studio / Firebase)
+# ==========================================================================
+.gradle/
+**/build/
+local.properties
+.idea/
+*.iml
+.cxx/
+captures/
+.externalNativeBuild/
 
-# vercel
-.vercel
+# Android signing keys & Firebase client secrets
+*.jks
+*.keystore
+google-services.json
+!google-services.json.example
 
-# typescript
-*.tsbuildinfo
-next-env.d.ts
+# ==========================================================================
+# OS & Misc
+# ==========================================================================
+.DS_Store
+*.pem
