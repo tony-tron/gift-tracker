@@ -306,7 +306,11 @@ class FirebaseSyncManager(private val appContext: Context) {
          * 1. Web JS/JSON firebaseConfig snippet (`apiKey`, `projectId`, `appId`, optional `webClientId`), OR
          * 2. Android `google-services.json` content pasted directly!
          */
-        fun parseFirebaseSnippet(input: String, webClientIdOverride: String? = null): FirebaseRuntimeConfig? {
+        fun parseFirebaseSnippet(
+            input: String,
+            webClientIdOverride: String? = null,
+            targetPackageName: String? = null
+        ): FirebaseRuntimeConfig? {
             val trimmed = input.trim()
             if (trimmed.isEmpty()) return null
 
@@ -319,10 +323,14 @@ class FirebaseSyncManager(private val appContext: Context) {
                     val bucket = pInfo["storage_bucket"]?.jsonPrimitive?.content
                     val sender = pInfo["project_number"]?.jsonPrimitive?.content
                     val clients = root["client"]!!.jsonArray.mapNotNull { it.jsonObject }
-                    val client = clients.firstOrNull {
-                        it["client_info"]?.jsonObject?.get("android_client_info")?.jsonObject
-                            ?.get("package_name")?.jsonPrimitive?.content == "com.tonytron.gifttracker"
-                    } ?: clients.firstOrNull() ?: return@runCatching
+                    val client = if (!targetPackageName.isNullOrBlank()) {
+                        clients.firstOrNull {
+                            it["client_info"]?.jsonObject?.get("android_client_info")?.jsonObject
+                                ?.get("package_name")?.jsonPrimitive?.content == targetPackageName
+                        } ?: clients.firstOrNull()
+                    } else {
+                        clients.firstOrNull()
+                    } ?: return@runCatching
 
                     val appId = client["client_info"]?.jsonObject?.get("mobilesdk_app_id")?.jsonPrimitive?.content
                         ?: return@runCatching

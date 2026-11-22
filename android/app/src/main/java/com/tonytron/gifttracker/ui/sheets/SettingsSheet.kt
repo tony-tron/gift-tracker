@@ -380,8 +380,9 @@ fun SettingsSheet(
                             Button(
                                 onClick = {
                                     val parsed = FirebaseSyncManager.parseFirebaseSnippet(
-                                        snippetInput,
-                                        webClientIdInput
+                                        input = snippetInput,
+                                        webClientIdOverride = webClientIdInput,
+                                        targetPackageName = context.packageName
                                     )
                                     if (parsed == null) {
                                         configError = "Could not find apiKey and projectId. Paste firebaseConfig or google-services.json."
