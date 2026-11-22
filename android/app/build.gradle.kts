@@ -19,8 +19,8 @@ android {
         applicationId = "com.tonytron.gifttracker"
         minSdk = 28
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.0.1"
 
         vectorDrawables {
             useSupportLibrary = true
@@ -98,9 +98,10 @@ dependencies {
     implementation(libs.androidx.graphics.shapes)
     debugImplementation(libs.androidx.compose.ui.tooling)
 
-    // Jetpack Glance Home Screen AppWidget (Material 3)
+    // Jetpack Glance Home Screen AppWidget (Material 3) & modern WorkManager runtime
     implementation(libs.androidx.glance.appwidget)
     implementation(libs.androidx.glance.material3)
+    implementation(libs.androidx.work.runtime.ktx)
 
     // Offline-First Local Storage & JSON Backup Serialization
     implementation(libs.androidx.datastore.preferences)
