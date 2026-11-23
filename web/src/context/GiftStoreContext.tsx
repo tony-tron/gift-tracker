@@ -115,6 +115,7 @@ interface GiftStoreContextValue {
   addWish: (input: Omit<WishItem, 'id'>) => WishItem;
   updateWish: (id: string, patch: Partial<WishItem>) => void;
   deleteWish: (id: string) => void;
+  reorderWishes: (orderedIds: string[]) => void;
 
   // Reset & Backup
   resetData: () => void;
@@ -147,7 +148,7 @@ function readInitialDataset(): GiftDataset {
           people: [...parsed.people].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
           events: parsed.events,
           gifts: parsed.gifts,
-          wishes: parsed.wishes,
+          wishes: [...parsed.wishes].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
         };
       }
     }
@@ -713,9 +714,14 @@ export function GiftStoreProvider({ children }: { children: React.ReactNode }) {
   // Wishes CRUD
   const addWish = useCallback(
     (input: Omit<WishItem, 'id'>): WishItem => {
+      const minOrder = datasetRef.current.wishes.reduce(
+        (min, w) => Math.min(min, w.order ?? 0),
+        0
+      );
       const wish: WishItem = {
         ...input,
         id: makeId('wish'),
+        order: datasetRef.current.wishes.length > 0 ? minOrder - 1 : 0,
       };
       setDataset((prev) => ({ ...prev, wishes: [wish, ...prev.wishes] }));
       if (firebaseUser) {
@@ -754,6 +760,37 @@ export function GiftStoreProvider({ children }: { children: React.ReactNode }) {
         void deleteRemoteDoc('wishes', id, firebaseUser.uid);
       }
       showSnackbar('Removed item from Wishlist');
+    },
+    [firebaseUser, showSnackbar]
+  );
+
+  const reorderWishes = useCallback(
+    (orderedIds: string[]) => {
+      setDataset((prev) => {
+        const idMap = new Map(prev.wishes.map((w) => [w.id, w]));
+        const nextWishes: WishItem[] = [];
+        orderedIds.forEach((id, index) => {
+          const w = idMap.get(id);
+          if (w) {
+            const updated = { ...w, order: index };
+            nextWishes.push(updated);
+            if (firebaseUser) {
+              void upsertRemoteDoc('wishes', id, updated, firebaseUser.uid);
+            }
+          }
+        });
+        prev.wishes.forEach((w) => {
+          if (!orderedIds.includes(w.id)) {
+            const updated = { ...w, order: nextWishes.length };
+            nextWishes.push(updated);
+            if (firebaseUser) {
+              void upsertRemoteDoc('wishes', w.id, updated, firebaseUser.uid);
+            }
+          }
+        });
+        return { ...prev, wishes: nextWishes };
+      });
+      showSnackbar('Updated wishlist order');
     },
     [firebaseUser, showSnackbar]
   );
@@ -847,6 +884,7 @@ export function GiftStoreProvider({ children }: { children: React.ReactNode }) {
       addWish,
       updateWish,
       deleteWish,
+      reorderWishes,
       resetData,
       exportJsonBackup,
       importJsonBackup,
@@ -886,6 +924,7 @@ export function GiftStoreProvider({ children }: { children: React.ReactNode }) {
       addWish,
       updateWish,
       deleteWish,
+      reorderWishes,
       resetData,
       exportJsonBackup,
       importJsonBackup,

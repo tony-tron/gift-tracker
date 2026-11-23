@@ -285,6 +285,7 @@ class FirebaseSyncManager(private val appContext: Context) {
             if (snap != null) {
                 val items = snap.documents
                     .mapNotNull { d -> d.data?.let { WishItem.fromFirestoreMap(it, d.id) } }
+                    .sortedBy { it.order }
                 onWishes(items)
             }
         }

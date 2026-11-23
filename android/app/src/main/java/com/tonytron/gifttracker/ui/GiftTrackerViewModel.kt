@@ -148,6 +148,12 @@ class GiftTrackerViewModel(application: Application) : AndroidViewModel(applicat
         closeGiftComposer()
     }
 
+    fun saveSharedWish(title: String, url: String, notes: String) {
+        repository.addWish(title = title, url = url, notes = notes)
+        _uiState.update { it.copy(activeTab = NavTab.WISHLIST, composerPreset = null) }
+        showMessage("Added \"${title.trim()}\" to My Wishlist")
+    }
+
     fun deleteGiftWithUndo(id: String) {
         val removed = repository.deleteGift(id) ?: return
         closeGiftComposer()
@@ -258,6 +264,11 @@ class GiftTrackerViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     fun updateWish(wish: WishItem) = repository.updateWish(wish)
+
+    fun reorderWishes(orderedIds: List<String>) {
+        repository.reorderWishes(orderedIds)
+        showMessage("Updated wishlist order")
+    }
     fun deleteWish(id: String) {
         repository.deleteWish(id)
         showMessage("Removed from Wishlist")

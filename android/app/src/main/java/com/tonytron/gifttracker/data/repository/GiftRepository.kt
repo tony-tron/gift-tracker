@@ -400,17 +400,41 @@ class GiftRepository(private val appContext: Context) {
     // --- Wishes CRUD ---
 
     fun addWish(title: String, url: String, priority: String = "medium", notes: String = ""): WishItem {
+        val currentWishes = _dataset.value.wishes
+        val minOrder = currentWishes.minOfOrNull { it.order } ?: 0
         val wish = WishItem(
             id = IdGenerator.generate("wish"),
             title = title.trim(),
             url = url.trim(),
             notes = notes.trim(),
-            priority = priority
+            priority = priority,
+            order = if (currentWishes.isNotEmpty()) minOrder - 1 else 0
         )
         val updated = _dataset.value.copy(wishes = listOf(wish) + _dataset.value.wishes)
         persistAndRefreshWidget(updated)
         syncUpsert("wishes", wish.id, wish.toFirestoreMap())
         return wish
+    }
+
+    fun reorderWishes(orderedIds: List<String>) {
+        val map = _dataset.value.wishes.associateBy { it.id }
+        val next = mutableListOf<WishItem>()
+        orderedIds.forEachIndexed { idx, id ->
+            map[id]?.let {
+                val w = it.copy(order = idx)
+                next.add(w)
+                syncUpsert("wishes", w.id, w.toFirestoreMap())
+            }
+        }
+        _dataset.value.wishes.forEach { w ->
+            if (w.id !in orderedIds) {
+                val updated = w.copy(order = next.size)
+                next.add(updated)
+                syncUpsert("wishes", updated.id, updated.toFirestoreMap())
+            }
+        }
+        val updated = _dataset.value.copy(wishes = next)
+        persistAndRefreshWidget(updated)
     }
 
     fun updateWish(wish: WishItem) {

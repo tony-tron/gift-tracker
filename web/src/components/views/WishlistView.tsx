@@ -7,6 +7,7 @@ import {
   ChevronUp,
   ExternalLink,
   Gift,
+  GripVertical,
   Pencil,
   Plus,
   Share2,
@@ -19,7 +20,7 @@ import { ShareWishlistSheet } from '@/components/modals/ShareWishlistSheet';
 import type { WishItem } from '@/lib/types';
 
 export function WishlistView() {
-  const { wishes, addWish, updateWish, deleteWish, showSnackbar } = useGiftStore();
+  const { wishes, addWish, updateWish, deleteWish, reorderWishes, showSnackbar } = useGiftStore();
 
   const [filter, setFilter] = useState<'wanted' | 'received'>('wanted');
   const [newTitle, setNewTitle] = useState('');
@@ -41,8 +42,18 @@ export function WishlistView() {
   // Share Wishlist selection sheet
   const [isShareSheetOpen, setIsShareSheetOpen] = useState(false);
 
-  const wantedWishes = useMemo(() => wishes.filter((w) => !w.received), [wishes]);
-  const receivedWishes = useMemo(() => wishes.filter((w) => w.received), [wishes]);
+  // Reorder state
+  const [showOrderButtons, setShowOrderButtons] = useState(false);
+  const [draggedWishId, setDraggedWishId] = useState<string | null>(null);
+  const [dragOverWishId, setDragOverWishId] = useState<string | null>(null);
+  const [dropPosition, setDropPosition] = useState<'before' | 'after'>('after');
+
+  const sortedWishes = useMemo(
+    () => [...wishes].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
+    [wishes]
+  );
+  const wantedWishes = useMemo(() => sortedWishes.filter((w) => !w.received), [sortedWishes]);
+  const receivedWishes = useMemo(() => sortedWishes.filter((w) => w.received), [sortedWishes]);
 
   const displayed = filter === 'wanted' ? wantedWishes : receivedWishes;
 
@@ -86,6 +97,80 @@ export function WishlistView() {
 
   const handleCancelEdit = () => {
     setEditingWishId(null);
+  };
+
+  const commitDisplayedOrder = (nextDisplayed: WishItem[]) => {
+    const others = filter === 'wanted' ? receivedWishes : wantedWishes;
+    const merged = filter === 'wanted' ? [...nextDisplayed, ...others] : [...others, ...nextDisplayed];
+    reorderWishes(merged.map((w) => w.id));
+  };
+
+  const handleDragStart = (e: React.DragEvent, id: string) => {
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', id);
+    setDraggedWishId(id);
+  };
+
+  const handleDragOver = (e: React.DragEvent, id: string) => {
+    if (draggedWishId === id) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    const rect = e.currentTarget.getBoundingClientRect();
+    const midY = rect.top + rect.height / 2;
+    const pos = e.clientY < midY ? 'before' : 'after';
+    setDragOverWishId(id);
+    setDropPosition(pos);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+    setDragOverWishId(null);
+  };
+
+  const handleDrop = (e: React.DragEvent, targetId: string) => {
+    e.preventDefault();
+    if (!draggedWishId || draggedWishId === targetId) {
+      setDraggedWishId(null);
+      setDragOverWishId(null);
+      return;
+    }
+
+    const draggedIdx = displayed.findIndex((w) => w.id === draggedWishId);
+    const targetIdx = displayed.findIndex((w) => w.id === targetId);
+    if (draggedIdx === -1 || targetIdx === -1) {
+      setDraggedWishId(null);
+      setDragOverWishId(null);
+      return;
+    }
+
+    const itemToMove = displayed[draggedIdx];
+    const without = displayed.filter((w) => w.id !== draggedWishId);
+    let insertIdx = without.findIndex((w) => w.id === targetId);
+    if (dropPosition === 'after') {
+      insertIdx += 1;
+    }
+    without.splice(insertIdx, 0, itemToMove);
+
+    commitDisplayedOrder(without);
+    setDraggedWishId(null);
+    setDragOverWishId(null);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedWishId(null);
+    setDragOverWishId(null);
+  };
+
+  const handleMoveStep = (id: string, direction: 'up' | 'down') => {
+    const idx = displayed.findIndex((w) => w.id === id);
+    if (idx === -1) return;
+    const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
+    if (targetIdx < 0 || targetIdx >= displayed.length) return;
+
+    const copy = [...displayed];
+    const [moved] = copy.splice(idx, 1);
+    copy.splice(targetIdx, 0, moved);
+    commitDisplayedOrder(copy);
   };
 
   return (
@@ -194,25 +279,65 @@ export function WishlistView() {
         )}
       </form>
 
-      {/* Segmented Filter */}
-      <div style={{ display: 'flex', gap: '8px' }}>
-        <button
-          type="button"
-          className="m3-chip"
-          data-selected={filter === 'wanted'}
-          onClick={() => setFilter('wanted')}
-        >
-          ⭐ Wishes ({wantedWishes.length})
-        </button>
-        <button
-          type="button"
-          className="m3-chip"
-          data-selected={filter === 'received'}
-          onClick={() => setFilter('received')}
-        >
-          <Gift size={14} /> Received Log ({receivedWishes.length})
-        </button>
+      {/* Segmented Filter + Reorder */}
+      <div
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: '8px',
+        }}
+      >
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button
+            type="button"
+            className="m3-chip"
+            data-selected={filter === 'wanted'}
+            onClick={() => setFilter('wanted')}
+          >
+            ⭐ Wishes ({wantedWishes.length})
+          </button>
+          <button
+            type="button"
+            className="m3-chip"
+            data-selected={filter === 'received'}
+            onClick={() => setFilter('received')}
+          >
+            <Gift size={14} /> Received Log ({receivedWishes.length})
+          </button>
+        </div>
+
+        {displayed.length > 1 && (
+          <button
+            type="button"
+            onClick={() => setShowOrderButtons((prev) => !prev)}
+            className={showOrderButtons ? 'm3-btn-filled' : 'm3-btn-tonal'}
+            style={{
+              height: '34px',
+              fontSize: '12px',
+              padding: '0 12px',
+              borderRadius: '12px',
+              flexShrink: 0,
+            }}
+          >
+            {showOrderButtons ? 'Done' : 'Reorder'}
+          </button>
+        )}
       </div>
+
+      {displayed.length > 1 && !showOrderButtons && !editingWishId && (
+        <span
+          style={{
+            fontSize: '11.5px',
+            color: 'var(--md-on-surface-variant)',
+            paddingLeft: '4px',
+            marginTop: '-10px',
+          }}
+        >
+          💡 Drag cards to rearrange your wishlist, or tap <strong>Reorder</strong>.
+        </span>
+      )}
 
       {/* Wishes List */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -232,12 +357,38 @@ export function WishlistView() {
             </p>
           </div>
         ) : (
-          displayed.map((wish) => {
+          displayed.map((wish, index) => {
             const isEditing = editingWishId === wish.id;
             const isLogging = editingReceivedId === wish.id;
+            const isDragging = draggedWishId === wish.id;
+            const isOver = dragOverWishId === wish.id;
+            const canDrag = !isEditing && displayed.length > 1;
+
+            let dropShadow = 'none';
+            if (isOver && !isDragging) {
+              dropShadow =
+                dropPosition === 'before'
+                  ? 'inset 0 3px 0 0 var(--md-primary)'
+                  : 'inset 0 -3px 0 0 var(--md-primary)';
+            }
 
             return (
-              <div key={wish.id} className="m3-surface-card" style={{ padding: '14px 16px' }}>
+              <div
+                key={wish.id}
+                className="m3-surface-card"
+                draggable={canDrag}
+                onDragStart={(e) => canDrag && handleDragStart(e, wish.id)}
+                onDragOver={(e) => canDrag && handleDragOver(e, wish.id)}
+                onDragLeave={handleDragLeave}
+                onDrop={(e) => canDrag && handleDrop(e, wish.id)}
+                onDragEnd={handleDragEnd}
+                style={{
+                  padding: '14px 16px',
+                  opacity: isDragging ? 0.35 : 1,
+                  boxShadow: dropShadow,
+                  transition: 'opacity 160ms ease, box-shadow 160ms ease',
+                }}
+              >
                 {isEditing ? (
                   /* Edit Wish Inline Form */
                   <form
@@ -310,6 +461,23 @@ export function WishlistView() {
                         gap: '12px',
                       }}
                     >
+                      {canDrag && (
+                        <div
+                          title="Drag to reorder"
+                          style={{
+                            cursor: 'grab',
+                            display: 'flex',
+                            alignItems: 'center',
+                            color: 'var(--md-on-surface-variant)',
+                            opacity: 0.55,
+                            paddingTop: '3px',
+                            flexShrink: 0,
+                          }}
+                        >
+                          <GripVertical size={16} />
+                        </div>
+                      )}
+
                       <div style={{ minWidth: 0, flex: 1 }}>
                         <h3
                           style={{
@@ -379,6 +547,41 @@ export function WishlistView() {
                       </div>
 
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+                        {showOrderButtons && displayed.length > 1 && (
+                          <div style={{ display: 'flex', gap: '2px', alignItems: 'center' }}>
+                            <button
+                              type="button"
+                              disabled={index === 0}
+                              onClick={() => handleMoveStep(wish.id, 'up')}
+                              className="m3-btn-icon"
+                              style={{
+                                width: '28px',
+                                height: '28px',
+                                opacity: index === 0 ? 0.3 : 0.85,
+                              }}
+                              aria-label="Move Up"
+                              title="Move Up"
+                            >
+                              <ChevronUp size={14} />
+                            </button>
+                            <button
+                              type="button"
+                              disabled={index === displayed.length - 1}
+                              onClick={() => handleMoveStep(wish.id, 'down')}
+                              className="m3-btn-icon"
+                              style={{
+                                width: '28px',
+                                height: '28px',
+                                opacity: index === displayed.length - 1 ? 0.3 : 0.85,
+                              }}
+                              aria-label="Move Down"
+                              title="Move Down"
+                            >
+                              <ChevronDown size={14} />
+                            </button>
+                          </div>
+                        )}
+
                         {!wish.received ? (
                           <button
                             type="button"

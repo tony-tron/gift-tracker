@@ -49,7 +49,7 @@ function GiftComposerForm({
   editingGift,
   initialDefaults,
 }: Omit<GiftComposerSheetProps, 'open'>) {
-  const { people, events, addGift, updateGift, deleteGift } = useGiftStore();
+  const { people, events, addGift, updateGift, deleteGift, addWish, setActiveTab } = useGiftStore();
 
   const [title, setTitle] = useState(() =>
     editingGift ? editingGift.title : initialDefaults?.title || ''
@@ -127,6 +127,21 @@ function GiftComposerForm({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim()) return;
+
+    if (!editingGift && destination === 'wishlist') {
+      addWish({
+        title: title.trim(),
+        url: url.trim(),
+        notes: notes.trim(),
+        received: false,
+        receivedFrom: '',
+        receivedWhen: '',
+        priority: 'medium',
+      });
+      setActiveTab('wishlist');
+      onClose();
+      return;
+    }
 
     const { cost, costLabel } = parseNumericCost(costStr);
     const isIdeas = destination === 'ideas' || destination === 'stockpile';
@@ -238,25 +253,33 @@ function GiftComposerForm({
             />
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-            <div>
-              <label className="m3-field-label" htmlFor="gift-person-select">
-                Recipient
-              </label>
-              <select
-                id="gift-person-select"
-                value={personId}
-                onChange={(e) => setPersonId(e.target.value)}
-                className="m3-select"
-              >
-                <option value="">Not sure who (General Pool)</option>
-                {people.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name} {p.budget > 0 ? `($${p.budget} budget)` : ''}
-                  </option>
-                ))}
-              </select>
-            </div>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: destination === 'wishlist' ? '1fr' : '1fr 1fr',
+              gap: '12px',
+            }}
+          >
+            {destination !== 'wishlist' && (
+              <div>
+                <label className="m3-field-label" htmlFor="gift-person-select">
+                  Recipient
+                </label>
+                <select
+                  id="gift-person-select"
+                  value={personId}
+                  onChange={(e) => setPersonId(e.target.value)}
+                  className="m3-select"
+                >
+                  <option value="">Not sure who (General Pool)</option>
+                  {people.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} {p.budget > 0 ? `($${p.budget} budget)` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
 
             <div>
               <label className="m3-field-label" htmlFor="gift-dest-select">
@@ -269,6 +292,7 @@ function GiftComposerForm({
                 className="m3-select"
               >
                 <option value="ideas">💡 Ideas Backlog</option>
+                {!editingGift && <option value="wishlist">⭐ My Personal Wishlist</option>}
                 <option value="stockpile">📦 Bought & Saved for Later</option>
                 <optgroup label="Events & Occasions">
                   {events.map((ev) => (
@@ -281,50 +305,54 @@ function GiftComposerForm({
             </div>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-            <div>
-              <label className="m3-field-label" htmlFor="gift-cost-input">
-                Price / Est. Cost ($)
-              </label>
-              <input
-                id="gift-cost-input"
-                type="text"
-                inputMode="decimal"
-                value={costStr}
-                onChange={(e) => setCostStr(e.target.value)}
-                placeholder="35 or 30-200"
-                className="m3-input"
-              />
-            </div>
+          {destination !== 'wishlist' && (
+            <>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                <div>
+                  <label className="m3-field-label" htmlFor="gift-cost-input">
+                    Price / Est. Cost ($)
+                  </label>
+                  <input
+                    id="gift-cost-input"
+                    type="text"
+                    inputMode="decimal"
+                    value={costStr}
+                    onChange={(e) => setCostStr(e.target.value)}
+                    placeholder="35 or 30-200"
+                    className="m3-input"
+                  />
+                </div>
 
-            <div>
-              <label className="m3-field-label" htmlFor="gift-store-input">
-                Store / From
-              </label>
-              <input
-                id="gift-store-input"
-                type="text"
-                value={store}
-                onChange={(e) => setStore(e.target.value)}
-                placeholder="Target, Cotopaxi, Etsy..."
-                className="m3-input"
-              />
-            </div>
-          </div>
+                <div>
+                  <label className="m3-field-label" htmlFor="gift-store-input">
+                    Store / From
+                  </label>
+                  <input
+                    id="gift-store-input"
+                    type="text"
+                    value={store}
+                    onChange={(e) => setStore(e.target.value)}
+                    placeholder="Target, Cotopaxi, Etsy..."
+                    className="m3-input"
+                  />
+                </div>
+              </div>
 
-          <div>
-            <label className="m3-field-label" htmlFor="gift-tracking-input">
-              Tracking # / Digital Code
-            </label>
-            <input
-              id="gift-tracking-input"
-              type="text"
-              value={tracking}
-              onChange={(e) => setTracking(e.target.value)}
-              placeholder="USPS / UPS tracking or gift card PIN..."
-              className="m3-input"
-            />
-          </div>
+              <div>
+                <label className="m3-field-label" htmlFor="gift-tracking-input">
+                  Tracking # / Digital Code
+                </label>
+                <input
+                  id="gift-tracking-input"
+                  type="text"
+                  value={tracking}
+                  onChange={(e) => setTracking(e.target.value)}
+                  placeholder="USPS / UPS tracking or gift card PIN..."
+                  className="m3-input"
+                />
+              </div>
+            </>
+          )}
 
           <div>
             <label className="m3-field-label" htmlFor="gift-notes-input">
@@ -340,53 +368,55 @@ function GiftComposerForm({
             />
           </div>
 
-          <div>
-            <span className="m3-field-label">Fulfillment Progress</span>
-            <div className="m3-connected-group">
-              <button
-                type="button"
-                className="m3-segment-btn"
-                data-kind="bought"
-                data-checked={bought}
-                onClick={() => {
-                  const next = !bought;
-                  setBought(next);
-                  if (!next) {
-                    setReceived(false);
-                    setWrapped(false);
-                  }
-                }}
-              >
-                {bought ? '✓ Bought' : 'Bought'}
-              </button>
-              <button
-                type="button"
-                className="m3-segment-btn"
-                data-kind="received"
-                data-checked={received}
-                onClick={() => {
-                  const next = !received;
-                  setReceived(next);
-                  if (next) setBought(true);
-                }}
-              >
-                {received ? '✓ Arrived' : 'Arrived'}
-              </button>
-              <button
-                type="button"
-                className="m3-segment-btn"
-                data-kind="wrapped"
-                data-checked={wrapped}
-                onClick={() => {
-                  const next = !wrapped;
-                  setWrapped(next);
-                  if (next) setBought(true);
-                }}
-              >
-                {wrapped ? '✓ Wrapped' : 'Wrapped'}
-              </button>
+          {destination !== 'wishlist' && (
+            <div>
+              <span className="m3-field-label">Fulfillment Progress</span>
+              <div className="m3-connected-group">
+                <button
+                  type="button"
+                  className="m3-segment-btn"
+                  data-kind="bought"
+                  data-checked={bought}
+                  onClick={() => {
+                    const next = !bought;
+                    setBought(next);
+                    if (!next) {
+                      setReceived(false);
+                      setWrapped(false);
+                    }
+                  }}
+                >
+                  {bought ? '✓ Bought' : 'Bought'}
+                </button>
+                <button
+                  type="button"
+                  className="m3-segment-btn"
+                  data-kind="received"
+                  data-checked={received}
+                  onClick={() => {
+                    const next = !received;
+                    setReceived(next);
+                    if (next) setBought(true);
+                  }}
+                >
+                  {received ? '✓ Arrived' : 'Arrived'}
+                </button>
+                <button
+                  type="button"
+                  className="m3-segment-btn"
+                  data-kind="wrapped"
+                  data-checked={wrapped}
+                  onClick={() => {
+                    const next = !wrapped;
+                    setWrapped(next);
+                    if (next) setBought(true);
+                  }}
+                >
+                  {wrapped ? '✓ Wrapped' : 'Wrapped'}
+                </button>
+              </div>
             </div>
-          </div>
+          )}
 
           <div
             style={{
@@ -425,7 +455,7 @@ function GiftComposerForm({
                 Cancel
               </button>
               <button type="submit" className="m3-btn-filled">
-                {editingGift ? 'Save Changes' : 'Save Gift'}
+                {editingGift ? 'Save Changes' : destination === 'wishlist' ? 'Add to Wishlist' : 'Save Gift'}
               </button>
             </div>
           </div>

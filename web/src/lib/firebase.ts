@@ -327,7 +327,9 @@ export function subscribeToWorkspace(
     onSnapshot(
       collection(db, 'workspaces', namespaceId, 'wishes'),
       (snap) => {
-        const items = snap.docs.map((d) => d.data() as WishItem);
+        const items = snap.docs
+          .map((d) => d.data() as WishItem)
+          .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
         handlers.onWishes(items);
       },
       (err) => handlers.onError?.(err)

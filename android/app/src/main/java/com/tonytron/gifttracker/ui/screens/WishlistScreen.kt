@@ -13,11 +13,13 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
@@ -27,6 +29,8 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.KeyboardArrowDown
+import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
@@ -91,12 +95,18 @@ fun WishlistScreen(
     // Share Selection Dialog state
     var showShareDialog by rememberSaveable { mutableStateOf(false) }
 
-    val wantedWishes = remember(dataset.wishes) { dataset.wishes.filter { !it.received } }
-    val receivedWishes = remember(dataset.wishes) { dataset.wishes.filter { it.received } }
+    // Reorder mode state
+    var reorderMode by rememberSaveable { mutableStateOf(false) }
+
+    val sortedWishes = remember(dataset.wishes) { dataset.wishes.sortedBy { it.order } }
+    val wantedWishes = remember(sortedWishes) { sortedWishes.filter { !it.received } }
+    val receivedWishes = remember(sortedWishes) { sortedWishes.filter { it.received } }
     val displayed = if (filter == "wanted") wantedWishes else receivedWishes
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier
+            .fillMaxSize()
+            .imePadding(),
         contentPadding = contentPadding,
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
@@ -206,19 +216,34 @@ fun WishlistScreen(
             }
         }
 
-        // Filter Chips
+        // Filter Chips + Reorder
         item {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(
-                    selected = filter == "wanted",
-                    onClick = { filter = "wanted" },
-                    label = { Text("⭐ Wishes (${wantedWishes.size})") }
-                )
-                FilterChip(
-                    selected = filter == "received",
-                    onClick = { filter = "received" },
-                    label = { Text("🎁 Received Log (${receivedWishes.size})") }
-                )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = filter == "wanted",
+                        onClick = { filter = "wanted" },
+                        label = { Text("⭐ Wishes (${wantedWishes.size})") }
+                    )
+                    FilterChip(
+                        selected = filter == "received",
+                        onClick = { filter = "received" },
+                        label = { Text("🎁 Received Log (${receivedWishes.size})") }
+                    )
+                }
+
+                if (displayed.size > 1) {
+                    FilledTonalButton(
+                        onClick = { reorderMode = !reorderMode },
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                    ) {
+                        Text(if (reorderMode) "Done" else "Reorder", fontSize = 12.sp)
+                    }
+                }
             }
         }
 
@@ -237,7 +262,7 @@ fun WishlistScreen(
                 }
             }
         } else {
-            items(displayed, key = { it.id }) { wish ->
+            itemsIndexed(displayed, key = { _, it -> it.id }) { index, wish ->
                 val isLogging = loggingWishId == wish.id
                 val isEditing = editingWishId == wish.id
 
@@ -325,6 +350,39 @@ fun WishlistScreen(
                                 }
 
                                 Row(verticalAlignment = Alignment.CenterVertically) {
+                                    if (reorderMode && displayed.size > 1) {
+                                        IconButton(
+                                            enabled = index > 0,
+                                            onClick = {
+                                                val mutable = displayed.toMutableList()
+                                                if (index > 0) {
+                                                    val item = mutable.removeAt(index)
+                                                    mutable.add(index - 1, item)
+                                                    val others = if (filter == "wanted") receivedWishes else wantedWishes
+                                                    val merged = if (filter == "wanted") mutable + others else others + mutable
+                                                    viewModel.reorderWishes(merged.map { it.id })
+                                                }
+                                            }
+                                        ) {
+                                            Icon(Icons.Rounded.KeyboardArrowUp, contentDescription = "Move Up")
+                                        }
+                                        IconButton(
+                                            enabled = index < displayed.size - 1,
+                                            onClick = {
+                                                val mutable = displayed.toMutableList()
+                                                if (index < mutable.size - 1) {
+                                                    val item = mutable.removeAt(index)
+                                                    mutable.add(index + 1, item)
+                                                    val others = if (filter == "wanted") receivedWishes else wantedWishes
+                                                    val merged = if (filter == "wanted") mutable + others else others + mutable
+                                                    viewModel.reorderWishes(merged.map { it.id })
+                                                }
+                                            }
+                                        ) {
+                                            Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = "Move Down")
+                                        }
+                                    }
+
                                     if (!wish.received) {
                                         FilledTonalButton(
                                             onClick = {

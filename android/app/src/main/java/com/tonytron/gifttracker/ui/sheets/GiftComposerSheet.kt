@@ -173,30 +173,6 @@ fun GiftComposerSheet(
                 modifier = Modifier.fillMaxWidth()
             )
 
-            // Recipient Selector
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("Recipient", style = MaterialTheme.typography.labelLarge)
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    FilterChip(
-                        selected = personId == null,
-                        onClick = { personId = null },
-                        label = { Text("🎯 Not sure who") }
-                    )
-                    dataset.people.forEach { p ->
-                        FilterChip(
-                            selected = personId == p.id,
-                            onClick = { personId = p.id },
-                            label = { Text(p.name) }
-                        )
-                    }
-                }
-            }
-
             // Destination Selector
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("Destination", style = MaterialTheme.typography.labelLarge)
@@ -211,6 +187,13 @@ fun GiftComposerSheet(
                         onClick = { destination = "ideas" },
                         label = { Text("💡 Gift Ideas") }
                     )
+                    if (editing == null) {
+                        FilterChip(
+                            selected = destination == "wishlist",
+                            onClick = { destination = "wishlist" },
+                            label = { Text("⭐ My Wishlist") }
+                        )
+                    }
                     FilterChip(
                         selected = destination == "stockpile",
                         onClick = { destination = "stockpile" },
@@ -226,52 +209,78 @@ fun GiftComposerSheet(
                 }
             }
 
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedTextField(
-                    value = costStr,
-                    onValueChange = { costStr = it },
-                    label = { Text("Price / Range") },
-                    placeholder = { Text("e.g., 35 or 30-50") },
-                    singleLine = true,
-                    modifier = Modifier.weight(1f)
-                )
-                OutlinedTextField(
-                    value = store,
-                    onValueChange = { store = it },
-                    label = { Text("Store") },
-                    placeholder = { Text("Amazon, Etsy...") },
-                    singleLine = true,
-                    modifier = Modifier.weight(1f)
-                )
-            }
-
-            if (destination != "ideas") {
-                GiftStatusConnectedGroup(
-                    bought = if (destination == "stockpile") true else bought,
-                    received = received,
-                    wrapped = wrapped,
-                    onToggleBought = { bought = !bought },
-                    onToggleReceived = {
-                        received = !received
-                        if (received) bought = true
-                    },
-                    onToggleWrapped = {
-                        wrapped = !wrapped
-                        if (wrapped) {
-                            bought = true
-                            received = true
+            if (destination != "wishlist") {
+                // Recipient Selector
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Recipient", style = MaterialTheme.typography.labelLarge)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        FilterChip(
+                            selected = personId == null,
+                            onClick = { personId = null },
+                            label = { Text("🎯 Not sure who") }
+                        )
+                        dataset.people.forEach { p ->
+                            FilterChip(
+                                selected = personId == p.id,
+                                onClick = { personId = p.id },
+                                label = { Text(p.name) }
+                            )
                         }
                     }
+                }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedTextField(
+                        value = costStr,
+                        onValueChange = { costStr = it },
+                        label = { Text("Price / Range") },
+                        placeholder = { Text("e.g., 35 or 30-50") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f)
+                    )
+                    OutlinedTextField(
+                        value = store,
+                        onValueChange = { store = it },
+                        label = { Text("Store") },
+                        placeholder = { Text("Amazon, Etsy...") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                if (destination != "ideas") {
+                    GiftStatusConnectedGroup(
+                        bought = if (destination == "stockpile") true else bought,
+                        received = received,
+                        wrapped = wrapped,
+                        onToggleBought = { bought = !bought },
+                        onToggleReceived = {
+                            received = !received
+                            if (received) bought = true
+                        },
+                        onToggleWrapped = {
+                            wrapped = !wrapped
+                            if (wrapped) {
+                                bought = true
+                                received = true
+                            }
+                        }
+                    )
+                }
+
+                OutlinedTextField(
+                    value = tracking,
+                    onValueChange = { tracking = it },
+                    label = { Text("Order / Tracking Note (optional)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
                 )
             }
-
-            OutlinedTextField(
-                value = tracking,
-                onValueChange = { tracking = it },
-                label = { Text("Order / Tracking Note (optional)") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth()
-            )
 
             OutlinedTextField(
                 value = notes,
@@ -293,32 +302,46 @@ fun GiftComposerSheet(
                 Button(
                     enabled = title.isNotBlank(),
                     onClick = {
-                        val (parsedCost, parsedLabel) = parseCost(costStr)
-                        val isIdea = destination == "ideas" || destination == "stockpile"
-                        val saveForLater = destination == "stockpile"
-                        val eventId = if (isIdea) null else destination
+                        if (editing == null && destination == "wishlist") {
+                            viewModel.saveSharedWish(
+                                title = title.trim(),
+                                url = url.trim(),
+                                notes = notes.trim()
+                            )
+                        } else {
+                            val (parsedCost, parsedLabel) = parseCost(costStr)
+                            val isIdea = destination == "ideas" || destination == "stockpile"
+                            val saveForLater = destination == "stockpile"
+                            val eventId = if (isIdea) null else destination
 
-                        val item = GiftItem(
-                            id = editing?.id ?: "",
-                            title = title.trim(),
-                            personId = personId,
-                            eventId = eventId,
-                            cost = parsedCost,
-                            costLabel = parsedLabel,
-                            store = store.trim(),
-                            url = url.trim(),
-                            tracking = tracking.trim(),
-                            notes = notes.trim(),
-                            bought = if (saveForLater) true else bought,
-                            received = received,
-                            wrapped = wrapped,
-                            saveForLater = saveForLater,
-                            createdAt = editing?.createdAt ?: java.time.Instant.now().toString()
-                        )
-                        viewModel.saveGift(item, isEditing = editing != null)
+                            val item = GiftItem(
+                                id = editing?.id ?: "",
+                                title = title.trim(),
+                                personId = personId,
+                                eventId = eventId,
+                                cost = parsedCost,
+                                costLabel = parsedLabel,
+                                store = store.trim(),
+                                url = url.trim(),
+                                tracking = tracking.trim(),
+                                notes = notes.trim(),
+                                bought = if (saveForLater) true else bought,
+                                received = received,
+                                wrapped = wrapped,
+                                saveForLater = saveForLater,
+                                createdAt = editing?.createdAt ?: java.time.Instant.now().toString()
+                            )
+                            viewModel.saveGift(item, isEditing = editing != null)
+                        }
                     }
                 ) {
-                    Text(if (editing != null) "Save Changes" else "Save Gift")
+                    Text(
+                        when {
+                            editing != null -> "Save Changes"
+                            destination == "wishlist" -> "Add to Wishlist"
+                            else -> "Save Gift"
+                        }
+                    )
                 }
             }
         }

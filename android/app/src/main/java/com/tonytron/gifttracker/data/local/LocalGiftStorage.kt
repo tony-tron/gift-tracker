@@ -128,7 +128,8 @@ class LocalGiftStorage(private val context: Context) {
                 val decoded = readerJson.decodeFromString(GiftDataset.serializer(), file.readText())
                 decoded.copy(
                     people = decoded.people.sortedBy { it.order },
-                    events = decoded.events.ifEmpty { GiftDataset.defaultEvents() }
+                    events = decoded.events.ifEmpty { GiftDataset.defaultEvents() },
+                    wishes = decoded.wishes.sortedBy { it.order }
                 )
             }.getOrDefault(GiftDataset.EMPTY)
         }

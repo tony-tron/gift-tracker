@@ -235,7 +235,8 @@ data class WishItem(
     val received: Boolean = false,
     val receivedFrom: String = "",
     val receivedWhen: String = "",
-    val priority: String = "medium" // high | medium | low
+    val priority: String = "medium", // high | medium | low
+    val order: Int = 0
 ) {
     fun toFirestoreMap(): Map<String, Any?> = mapOf(
         "id" to id,
@@ -245,7 +246,8 @@ data class WishItem(
         "received" to received,
         "receivedFrom" to receivedFrom,
         "receivedWhen" to receivedWhen,
-        "priority" to priority
+        "priority" to priority,
+        "order" to order
     )
 
     companion object {
@@ -257,7 +259,8 @@ data class WishItem(
             received = (map["received"] as? Boolean) ?: false,
             receivedFrom = (map["receivedFrom"] as? String) ?: "",
             receivedWhen = (map["receivedWhen"] as? String) ?: "",
-            priority = (map["priority"] as? String) ?: "medium"
+            priority = (map["priority"] as? String) ?: "medium",
+            order = (map["order"] as? Number)?.toInt() ?: 0
         )
     }
 }

@@ -68,6 +68,7 @@ export interface WishItem {
   receivedFrom: string;
   receivedWhen: string;
   priority: 'high' | 'medium' | 'low';
+  order?: number;
 }
 
 export interface GiftDataset {

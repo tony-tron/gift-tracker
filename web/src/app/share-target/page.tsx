@@ -98,7 +98,7 @@ function ShareTargetReceiver() {
       >
         <Loader2 size={28} style={{ color: 'var(--md-primary)' }} />
         <p style={{ fontWeight: 600, fontSize: '15px' }}>
-          Importing shared link into Gift Ideas...
+          Importing shared link...
         </p>
       </div>
     );
