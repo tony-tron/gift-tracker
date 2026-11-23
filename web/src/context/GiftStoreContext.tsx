@@ -104,6 +104,7 @@ interface GiftStoreContextValue {
   ) => Person;
   updatePerson: (id: string, patch: Partial<Person>) => void;
   deletePerson: (id: string) => void;
+  reorderPeople: (orderedIds: string[]) => void;
 
   // Event CRUD
   addEvent: (input: Omit<GiftEvent, 'id' | 'order'>) => GiftEvent;
@@ -143,7 +144,7 @@ function readInitialDataset(): GiftDataset {
       const parsed = JSON.parse(savedRaw) as Partial<GiftDataset>;
       if (parsed.people && parsed.events && parsed.gifts && parsed.wishes) {
         return {
-          people: parsed.people,
+          people: [...parsed.people].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
           events: parsed.events,
           gifts: parsed.gifts,
           wishes: parsed.wishes,
@@ -618,6 +619,37 @@ export function GiftStoreProvider({ children }: { children: React.ReactNode }) {
     [firebaseUser, selectedPersonId, showSnackbar]
   );
 
+  const reorderPeople = useCallback(
+    (orderedIds: string[]) => {
+      setDataset((prev) => {
+        const idMap = new Map(prev.people.map((p) => [p.id, p]));
+        const nextPeople: Person[] = [];
+        orderedIds.forEach((id, index) => {
+          const p = idMap.get(id);
+          if (p) {
+            const updated = { ...p, order: index };
+            nextPeople.push(updated);
+            if (firebaseUser) {
+              void upsertRemoteDoc('people', id, updated, firebaseUser.uid);
+            }
+          }
+        });
+        prev.people.forEach((p) => {
+          if (!orderedIds.includes(p.id)) {
+            const updated = { ...p, order: nextPeople.length };
+            nextPeople.push(updated);
+            if (firebaseUser) {
+              void upsertRemoteDoc('people', p.id, updated, firebaseUser.uid);
+            }
+          }
+        });
+        return { ...prev, people: nextPeople };
+      });
+      showSnackbar('Updated people order');
+    },
+    [firebaseUser, showSnackbar]
+  );
+
   // Events CRUD
   const addEvent = useCallback(
     (input: Omit<GiftEvent, 'id' | 'order'>): GiftEvent => {
@@ -808,6 +840,7 @@ export function GiftStoreProvider({ children }: { children: React.ReactNode }) {
       addPerson,
       updatePerson,
       deletePerson,
+      reorderPeople,
       addEvent,
       updateEvent,
       deleteEvent,
@@ -846,6 +879,7 @@ export function GiftStoreProvider({ children }: { children: React.ReactNode }) {
       addPerson,
       updatePerson,
       deletePerson,
+      reorderPeople,
       addEvent,
       updateEvent,
       deleteEvent,

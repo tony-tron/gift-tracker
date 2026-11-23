@@ -42,6 +42,7 @@ local.properties
 .cxx/
 captures/
 .externalNativeBuild/
+.kotlin/
 
 # Android signing keys & Firebase client secrets
 *.jks

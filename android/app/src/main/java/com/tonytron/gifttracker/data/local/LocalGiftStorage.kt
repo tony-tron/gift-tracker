@@ -126,7 +126,10 @@ class LocalGiftStorage(private val context: Context) {
             return runCatching {
                 val readerJson = Json { ignoreUnknownKeys = true }
                 val decoded = readerJson.decodeFromString(GiftDataset.serializer(), file.readText())
-                decoded.copy(events = decoded.events.ifEmpty { GiftDataset.defaultEvents() })
+                decoded.copy(
+                    people = decoded.people.sortedBy { it.order },
+                    events = decoded.events.ifEmpty { GiftDataset.defaultEvents() }
+                )
             }.getOrDefault(GiftDataset.EMPTY)
         }
 

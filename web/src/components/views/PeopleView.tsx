@@ -4,7 +4,11 @@ import React, { useMemo, useState } from 'react';
 import {
   ArrowLeft,
   ArrowRight,
+  ArrowUpDown,
+  ChevronDown,
+  ChevronUp,
   Clock,
+  GripVertical,
   Pencil,
   Plus,
   Ruler,
@@ -15,6 +19,14 @@ import {
 import { useGiftStore } from '@/context/GiftStoreContext';
 import { ExpressiveProgress } from '@/components/ui/ExpressiveProgress';
 import type { GiftItem, Person } from '@/lib/types';
+
+export type PeopleSortOption =
+  | 'default'
+  | 'name-asc'
+  | 'name-desc'
+  | 'budget-desc'
+  | 'spent-desc'
+  | 'ideas-desc';
 
 interface PeopleViewProps {
   onOpenPersonEditor: (person?: Person | null) => void;
@@ -35,28 +47,18 @@ export function PeopleView({
     setSelectedPersonId,
     updatePerson,
     moveGiftToEvent,
+    reorderPeople,
   } = useGiftStore();
 
   const [searchQuery, setSearchQuery] = useState('');
+  const [sortOption, setSortOption] = useState<PeopleSortOption>('default');
   const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
+  const [showOrderButtons, setShowOrderButtons] = useState(false);
+  const [draggedPersonId, setDraggedPersonId] = useState<string | null>(null);
+  const [dragOverPersonId, setDragOverPersonId] = useState<string | null>(null);
+  const [dropPosition, setDropPosition] = useState<'before' | 'after'>('after');
 
   const eventMap = useMemo(() => new Map(events.map((e) => [e.id, e])), [events]);
-
-  const filteredPeople = useMemo(() => {
-    if (!searchQuery.trim()) return people;
-    const q = searchQuery.toLowerCase();
-    return people.filter(
-      (p) =>
-        p.name.toLowerCase().includes(q) ||
-        p.notes.toLowerCase().includes(q) ||
-        Object.values(p.sizes || {}).some((s) => s?.toLowerCase().includes(q))
-    );
-  }, [people, searchQuery]);
-
-  const activePerson = useMemo(
-    () => people.find((p) => p.id === selectedPersonId) || people[0] || null,
-    [people, selectedPersonId]
-  );
 
   // Per-person quick stats
   const personStatsMap = useMemo(() => {
@@ -76,6 +78,120 @@ export function PeopleView({
     }
     return map;
   }, [people, gifts]);
+
+  const filteredPeople = useMemo(() => {
+    let list = [...people];
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      list = list.filter(
+        (p) =>
+          p.name.toLowerCase().includes(q) ||
+          p.notes.toLowerCase().includes(q) ||
+          Object.values(p.sizes || {}).some((s) => s?.toLowerCase().includes(q))
+      );
+    }
+
+    switch (sortOption) {
+      case 'name-asc':
+        return list.sort((a, b) => a.name.localeCompare(b.name));
+      case 'name-desc':
+        return list.sort((a, b) => b.name.localeCompare(a.name));
+      case 'budget-desc':
+        return list.sort((a, b) => (b.budget || 0) - (a.budget || 0));
+      case 'spent-desc':
+        return list.sort((a, b) => {
+          const spentA = personStatsMap.get(a.id)?.xmasSpent || 0;
+          const spentB = personStatsMap.get(b.id)?.xmasSpent || 0;
+          return spentB - spentA;
+        });
+      case 'ideas-desc':
+        return list.sort((a, b) => {
+          const ideasA = personStatsMap.get(a.id)?.ideasCount || 0;
+          const ideasB = personStatsMap.get(b.id)?.ideasCount || 0;
+          return ideasB - ideasA;
+        });
+      case 'default':
+      default:
+        return list.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+    }
+  }, [people, searchQuery, sortOption, personStatsMap]);
+
+  const activePerson = useMemo(
+    () => people.find((p) => p.id === selectedPersonId) || people[0] || null,
+    [people, selectedPersonId]
+  );
+
+  const handleDragStart = (e: React.DragEvent, id: string) => {
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', id);
+    setDraggedPersonId(id);
+  };
+
+  const handleDragOver = (e: React.DragEvent, id: string) => {
+    if (draggedPersonId === id) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    const rect = e.currentTarget.getBoundingClientRect();
+    const midY = rect.top + rect.height / 2;
+    const pos = e.clientY < midY ? 'before' : 'after';
+    setDragOverPersonId(id);
+    setDropPosition(pos);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+    setDragOverPersonId(null);
+  };
+
+  const handleDrop = (e: React.DragEvent, targetId: string) => {
+    e.preventDefault();
+    if (!draggedPersonId || draggedPersonId === targetId) {
+      setDraggedPersonId(null);
+      setDragOverPersonId(null);
+      return;
+    }
+
+    const currentOrder = [...people].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+    const draggedIdx = currentOrder.findIndex((p) => p.id === draggedPersonId);
+    const targetIdx = currentOrder.findIndex((p) => p.id === targetId);
+
+    if (draggedIdx === -1 || targetIdx === -1) {
+      setDraggedPersonId(null);
+      setDragOverPersonId(null);
+      return;
+    }
+
+    const itemToMove = currentOrder[draggedIdx];
+    const without = currentOrder.filter((p) => p.id !== draggedPersonId);
+    let insertIdx = without.findIndex((p) => p.id === targetId);
+    if (dropPosition === 'after') {
+      insertIdx += 1;
+    }
+    without.splice(insertIdx, 0, itemToMove);
+
+    reorderPeople(without.map((p) => p.id));
+    setDraggedPersonId(null);
+    setDragOverPersonId(null);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedPersonId(null);
+    setDragOverPersonId(null);
+  };
+
+  const handleMoveStep = (id: string, direction: 'up' | 'down') => {
+    const currentOrder = [...people].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+    const idx = currentOrder.findIndex((p) => p.id === id);
+    if (idx === -1) return;
+    const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
+    if (targetIdx < 0 || targetIdx >= currentOrder.length) return;
+
+    const copy = [...currentOrder];
+    const [moved] = copy.splice(idx, 1);
+    copy.splice(targetIdx, 0, moved);
+
+    reorderPeople(copy.map((p) => p.id));
+  };
 
   // Selected person's gifts categorized
   const activePersonData = useMemo(() => {
@@ -161,9 +277,74 @@ export function PeopleView({
           </button>
         </div>
 
+        {/* Sort & Reorder Bar */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '8px',
+            padding: '2px 4px',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: 1, minWidth: 0 }}>
+            <ArrowUpDown size={14} style={{ color: 'var(--md-primary)', flexShrink: 0 }} />
+            <select
+              value={sortOption}
+              onChange={(e) => setSortOption(e.target.value as PeopleSortOption)}
+              className="m3-input"
+              style={{
+                height: '34px',
+                fontSize: '12px',
+                borderRadius: '12px',
+                padding: '0 8px',
+                flex: 1,
+                cursor: 'pointer',
+              }}
+              aria-label="Sort recipients"
+            >
+              <option value="default">Default (Custom Order)</option>
+              <option value="name-asc">Name (A → Z)</option>
+              <option value="name-desc">Name (Z → A)</option>
+              <option value="budget-desc">Budget (High → Low)</option>
+              <option value="spent-desc">Spent (High → Low)</option>
+              <option value="ideas-desc">Ideas Count (Most → Least)</option>
+            </select>
+          </div>
+
+          {sortOption === 'default' && !searchQuery.trim() && people.length > 1 && (
+            <button
+              type="button"
+              onClick={() => setShowOrderButtons((prev) => !prev)}
+              className="m3-btn-tonal"
+              style={{ height: '34px', fontSize: '11.5px', padding: '0 10px', flexShrink: 0 }}
+              title="Toggle Up/Down move buttons for mobile or precise reordering"
+            >
+              {showOrderButtons ? 'Done' : 'Reorder'}
+            </button>
+          )}
+        </div>
+
+        {sortOption === 'default' && !searchQuery.trim() && people.length > 1 && !showOrderButtons && (
+          <span
+            style={{
+              fontSize: '11px',
+              color: 'var(--md-on-surface-variant)',
+              paddingLeft: '6px',
+              marginTop: '-4px',
+            }}
+          >
+            💡 Drag cards to rearrange default order, or tap <strong>Reorder</strong>.
+          </span>
+        )}
+
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          {filteredPeople.map((person) => {
+          {filteredPeople.map((person, index) => {
             const selected = activePerson?.id === person.id;
+            const isDragging = draggedPersonId === person.id;
+            const isOver = dragOverPersonId === person.id;
+            const canDrag = sortOption === 'default' && !searchQuery.trim();
+
             const st = personStatsMap.get(person.id) || { xmasSpent: 0, ideasCount: 0 };
             const sizeSummary = [
               person.sizes?.top ? `Top ${person.sizes.top}` : null,
@@ -172,18 +353,26 @@ export function PeopleView({
               .filter(Boolean)
               .join(' • ');
 
+            let dropShadow = 'none';
+            if (isOver && !isDragging) {
+              dropShadow =
+                dropPosition === 'before'
+                  ? 'inset 0 3px 0 0 var(--md-primary)'
+                  : 'inset 0 -3px 0 0 var(--md-primary)';
+            }
+
             return (
-              <button
+              <div
                 key={person.id}
-                type="button"
-                onClick={() => {
-                  setSelectedPersonId(person.id);
-                  setMobileDetailOpen(true);
-                }}
+                draggable={canDrag}
+                onDragStart={(e) => canDrag && handleDragStart(e, person.id)}
+                onDragOver={(e) => canDrag && handleDragOver(e, person.id)}
+                onDragLeave={handleDragLeave}
+                onDrop={(e) => canDrag && handleDrop(e, person.id)}
+                onDragEnd={handleDragEnd}
                 style={{
                   width: '100%',
-                  textAlign: 'left',
-                  padding: '13px 14px',
+                  padding: '12px 14px',
                   borderRadius: selected ? '24px' : '18px',
                   background: selected
                     ? 'var(--md-secondary-container)'
@@ -194,19 +383,46 @@ export function PeopleView({
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'space-between',
-                  gap: '12px',
-                  transition: 'all 260ms var(--spring-fast)',
+                  gap: '10px',
+                  transition: 'all 200ms ease',
+                  opacity: isDragging ? 0.35 : 1,
+                  boxShadow: dropShadow,
+                  cursor: canDrag ? 'grab' : 'pointer',
+                  userSelect: 'none',
+                }}
+                onClick={() => {
+                  setSelectedPersonId(person.id);
+                  setMobileDetailOpen(true);
                 }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0, flex: 1 }}>
+                  {canDrag && (
+                    <div
+                      title="Drag to reorder"
+                      style={{
+                        cursor: 'grab',
+                        display: 'flex',
+                        alignItems: 'center',
+                        color: 'var(--md-on-surface-variant)',
+                        opacity: 0.6,
+                        flexShrink: 0,
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <GripVertical size={16} />
+                    </div>
+                  )}
+
                   <div
                     className="m3-avatar"
                     data-shape={person.avatarShape}
                     data-tone={person.avatarTone}
+                    style={{ flexShrink: 0 }}
                   >
                     {person.name.slice(0, 2).toUpperCase()}
                   </div>
-                  <div style={{ minWidth: 0 }}>
+
+                  <div style={{ minWidth: 0, flex: 1 }}>
                     <div style={{ fontWeight: 700, fontSize: '15px' }}>{person.name}</div>
                     <div
                       style={{
@@ -223,23 +439,63 @@ export function PeopleView({
                   </div>
                 </div>
 
-                <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                  {person.budget > 0 ? (
-                    <>
-                      <div className="m3-display-num" style={{ fontSize: '14px' }}>
-                        ${st.xmasSpent} / ${person.budget}
-                      </div>
-                      <span style={{ fontSize: '11px', opacity: 0.75 }}>2026 Xmas</span>
-                    </>
-                  ) : st.xmasSpent > 0 ? (
-                    <div className="m3-display-num" style={{ fontSize: '14px' }}>
-                      ${st.xmasSpent}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+                  {showOrderButtons && canDrag && (
+                    <div
+                      style={{ display: 'flex', gap: '2px', alignItems: 'center' }}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <button
+                        type="button"
+                        disabled={index === 0}
+                        onClick={() => handleMoveStep(person.id, 'up')}
+                        className="m3-btn-icon"
+                        style={{
+                          width: '28px',
+                          height: '28px',
+                          opacity: index === 0 ? 0.3 : 0.8,
+                        }}
+                        aria-label="Move Up"
+                        title="Move Up"
+                      >
+                        <ChevronUp size={14} />
+                      </button>
+                      <button
+                        type="button"
+                        disabled={index === filteredPeople.length - 1}
+                        onClick={() => handleMoveStep(person.id, 'down')}
+                        className="m3-btn-icon"
+                        style={{
+                          width: '28px',
+                          height: '28px',
+                          opacity: index === filteredPeople.length - 1 ? 0.3 : 0.8,
+                        }}
+                        aria-label="Move Down"
+                        title="Move Down"
+                      >
+                        <ChevronDown size={14} />
+                      </button>
                     </div>
-                  ) : (
-                    <span style={{ fontSize: '11.5px', opacity: 0.7 }}>Profile →</span>
                   )}
+
+                  <div style={{ textAlign: 'right' }}>
+                    {person.budget > 0 ? (
+                      <>
+                        <div className="m3-display-num" style={{ fontSize: '14px' }}>
+                          ${st.xmasSpent} / ${person.budget}
+                        </div>
+                        <span style={{ fontSize: '11px', opacity: 0.75 }}>2026 Xmas</span>
+                      </>
+                    ) : st.xmasSpent > 0 ? (
+                      <div className="m3-display-num" style={{ fontSize: '14px' }}>
+                        ${st.xmasSpent}
+                      </div>
+                    ) : (
+                      <span style={{ fontSize: '11.5px', opacity: 0.7 }}>Profile →</span>
+                    )}
+                  </div>
                 </div>
-              </button>
+              </div>
             );
           })}
         </div>

@@ -240,6 +240,11 @@ class GiftTrackerViewModel(application: Application) : AndroidViewModel(applicat
         showMessage("Removed ${person.name}")
     }
 
+    fun reorderPeople(orderedIds: List<String>) {
+        repository.reorderPeople(orderedIds)
+        showMessage("Updated recipient order")
+    }
+
     // Occasions & Wishes
     fun addEvent(name: String, year: Int, occasion: String, emoji: String) {
         val created = repository.addEvent(name, year, occasion, emoji)
@@ -247,8 +252,8 @@ class GiftTrackerViewModel(application: Application) : AndroidViewModel(applicat
         showMessage("Created ${created.emoji} ${created.name}")
     }
 
-    fun addWish(title: String, url: String) {
-        repository.addWish(title, url)
+    fun addWish(title: String, url: String, notes: String = "") {
+        repository.addWish(title = title, url = url, notes = notes)
         showMessage("Added to Wishlist")
     }
 

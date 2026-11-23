@@ -2,6 +2,7 @@ package com.tonytron.gifttracker.ui.screens
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -14,7 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
@@ -22,13 +23,20 @@ import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Checkroom
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.History
+import androidx.compose.material.icons.rounded.KeyboardArrowDown
+import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material.icons.rounded.PersonAdd
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.SwapVert
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -52,6 +60,15 @@ import com.tonytron.gifttracker.ui.GiftTrackerViewModel
 import com.tonytron.gifttracker.ui.components.ExpressiveAvatar
 import com.tonytron.gifttracker.ui.components.ExpressiveBudgetBar
 
+enum class PeopleSortOption(val label: String) {
+    DEFAULT("Default"),
+    NAME_ASC("Name (A-Z)"),
+    NAME_DESC("Name (Z-A)"),
+    BUDGET_DESC("Budget (High)"),
+    SPENT_DESC("Spent (High)"),
+    IDEAS_DESC("Most Ideas")
+}
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun PeopleScreen(
@@ -63,10 +80,13 @@ fun PeopleScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
     var searchQuery by rememberSaveable { mutableStateOf("") }
+    var sortOption by rememberSaveable { mutableStateOf(PeopleSortOption.DEFAULT) }
+    var reorderMode by rememberSaveable { mutableStateOf(false) }
+    var showSortMenu by remember { mutableStateOf(false) }
     var mobileDetailOpen by rememberSaveable { mutableStateOf(false) }
 
-    val filteredPeople = remember(dataset.people, searchQuery) {
-        if (searchQuery.isBlank()) dataset.people
+    val filteredPeople = remember(dataset.people, dataset.gifts, searchQuery, sortOption) {
+        val base = if (searchQuery.isBlank()) dataset.people
         else {
             val q = searchQuery.lowercase()
             dataset.people.filter { p ->
@@ -74,6 +94,19 @@ fun PeopleScreen(
                     p.notes.lowercase().contains(q) ||
                     p.sizes.nonEmptyEntries().any { (_, v) -> v.lowercase().contains(q) }
             }
+        }
+
+        when (sortOption) {
+            PeopleSortOption.NAME_ASC -> base.sortedBy { it.name.lowercase() }
+            PeopleSortOption.NAME_DESC -> base.sortedByDescending { it.name.lowercase() }
+            PeopleSortOption.BUDGET_DESC -> base.sortedByDescending { it.budget }
+            PeopleSortOption.SPENT_DESC -> base.sortedByDescending { p ->
+                dataset.gifts.filter { it.personId == p.id && it.eventId == "2026-christmas" }.sumOf { it.cost }
+            }
+            PeopleSortOption.IDEAS_DESC -> base.sortedByDescending { p ->
+                dataset.gifts.count { it.personId == p.id && it.eventId == null }
+            }
+            PeopleSortOption.DEFAULT -> base.sortedBy { it.order }
         }
     }
 
@@ -117,6 +150,46 @@ fun PeopleScreen(
                 }
             }
 
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box {
+                        FilterChip(
+                            selected = sortOption != PeopleSortOption.DEFAULT,
+                            onClick = { showSortMenu = true },
+                            leadingIcon = { Icon(Icons.Rounded.SwapVert, null, Modifier.size(16.dp)) },
+                            label = { Text("Sort: ${sortOption.label}", fontSize = 12.sp) }
+                        )
+                        DropdownMenu(
+                            expanded = showSortMenu,
+                            onDismissRequest = { showSortMenu = false }
+                        ) {
+                            PeopleSortOption.entries.forEach { opt ->
+                                DropdownMenuItem(
+                                    text = { Text(opt.label) },
+                                    onClick = {
+                                        sortOption = opt
+                                        showSortMenu = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    if (sortOption == PeopleSortOption.DEFAULT && searchQuery.isBlank() && dataset.people.size > 1) {
+                        FilledTonalButton(
+                            onClick = { reorderMode = !reorderMode },
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                        ) {
+                            Text(if (reorderMode) "Done" else "Reorder", fontSize = 12.sp)
+                        }
+                    }
+                }
+            }
+
             if (filteredPeople.isEmpty()) {
                 item {
                     Card(
@@ -143,7 +216,7 @@ fun PeopleScreen(
                     }
                 }
             } else {
-                items(filteredPeople, key = { it.id }) { person ->
+                itemsIndexed(filteredPeople, key = { _, it -> it.id }) { index, person ->
                     val isSelected = isTwoPane && activePerson?.id == person.id
                     val spent2026 = dataset.gifts
                         .filter { it.personId == person.id && it.eventId == "2026-christmas" }
@@ -191,25 +264,58 @@ fun PeopleScreen(
                                 }
                             }
 
-                            Column(horizontalAlignment = Alignment.End) {
-                                if (person.budget > 0) {
-                                    Text(
-                                        "$${spent2026.toInt()} / $${person.budget.toInt()}",
-                                        fontWeight = FontWeight.ExtraBold,
-                                        fontSize = 14.sp
-                                    )
-                                    Text(
-                                        "Budget",
-                                        fontSize = 11.sp,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                } else {
-                                    Text(
-                                        "Profile →",
-                                        fontSize = 12.sp,
-                                        color = MaterialTheme.colorScheme.primary,
-                                        fontWeight = FontWeight.Bold
-                                    )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                if (reorderMode && sortOption == PeopleSortOption.DEFAULT && searchQuery.isBlank()) {
+                                    IconButton(
+                                        enabled = index > 0,
+                                        onClick = {
+                                            val list = dataset.people.sortedBy { it.order }.toMutableList()
+                                            val fromIdx = list.indexOfFirst { it.id == person.id }
+                                            if (fromIdx > 0) {
+                                                val item = list.removeAt(fromIdx)
+                                                list.add(fromIdx - 1, item)
+                                                viewModel.reorderPeople(list.map { it.id })
+                                            }
+                                        }
+                                    ) {
+                                        Icon(Icons.Rounded.KeyboardArrowUp, contentDescription = "Move Up")
+                                    }
+                                    IconButton(
+                                        enabled = index < filteredPeople.size - 1,
+                                        onClick = {
+                                            val list = dataset.people.sortedBy { it.order }.toMutableList()
+                                            val fromIdx = list.indexOfFirst { it.id == person.id }
+                                            if (fromIdx in 0 until list.size - 1) {
+                                                val item = list.removeAt(fromIdx)
+                                                list.add(fromIdx + 1, item)
+                                                viewModel.reorderPeople(list.map { it.id })
+                                            }
+                                        }
+                                    ) {
+                                        Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = "Move Down")
+                                    }
+                                }
+
+                                Column(horizontalAlignment = Alignment.End) {
+                                    if (person.budget > 0) {
+                                        Text(
+                                            "$${spent2026.toInt()} / $${person.budget.toInt()}",
+                                            fontWeight = FontWeight.ExtraBold,
+                                            fontSize = 14.sp
+                                        )
+                                        Text(
+                                            "Budget",
+                                            fontSize = 11.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    } else {
+                                        Text(
+                                            "Profile →",
+                                            fontSize = 12.sp,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
                                 }
                             }
                         }

@@ -1,8 +1,22 @@
 'use client';
 
 import React, { useMemo, useState } from 'react';
-import { Check, Copy, ExternalLink, Gift, Plus, Share2, Trash2 } from 'lucide-react';
+import {
+  Check,
+  ChevronDown,
+  ChevronUp,
+  ExternalLink,
+  Gift,
+  Pencil,
+  Plus,
+  Share2,
+  StickyNote,
+  Trash2,
+  X,
+} from 'lucide-react';
 import { useGiftStore } from '@/context/GiftStoreContext';
+import { ShareWishlistSheet } from '@/components/modals/ShareWishlistSheet';
+import type { WishItem } from '@/lib/types';
 
 export function WishlistView() {
   const { wishes, addWish, updateWish, deleteWish, showSnackbar } = useGiftStore();
@@ -10,9 +24,22 @@ export function WishlistView() {
   const [filter, setFilter] = useState<'wanted' | 'received'>('wanted');
   const [newTitle, setNewTitle] = useState('');
   const [newUrl, setNewUrl] = useState('');
+  const [newNotes, setNewNotes] = useState('');
+  const [showAddDetails, setShowAddDetails] = useState(false);
+
+  // Edit wish state
+  const [editingWishId, setEditingWishId] = useState<string | null>(null);
+  const [editTitle, setEditTitle] = useState('');
+  const [editUrl, setEditUrl] = useState('');
+  const [editNotes, setEditNotes] = useState('');
+
+  // Received logging state
   const [editingReceivedId, setEditingReceivedId] = useState<string | null>(null);
   const [fromInput, setFromInput] = useState('');
   const [whenInput, setWhenInput] = useState('Christmas 2026');
+
+  // Share Wishlist selection sheet
+  const [isShareSheetOpen, setIsShareSheetOpen] = useState(false);
 
   const wantedWishes = useMemo(() => wishes.filter((w) => !w.received), [wishes]);
   const receivedWishes = useMemo(() => wishes.filter((w) => w.received), [wishes]);
@@ -25,7 +52,7 @@ export function WishlistView() {
     addWish({
       title: newTitle.trim(),
       url: newUrl.trim(),
-      notes: '',
+      notes: newNotes.trim(),
       received: false,
       receivedFrom: '',
       receivedWhen: '',
@@ -33,33 +60,37 @@ export function WishlistView() {
     });
     setNewTitle('');
     setNewUrl('');
+    setNewNotes('');
+    setShowAddDetails(false);
   };
 
-  const handleShareWishlist = async () => {
-    const lines = wantedWishes.map(
-      (w, idx) => `${idx + 1}. ${w.title}${w.url ? ` (${w.url})` : ''}`
-    );
-    const formatted = `🎁 My Gift Wishlist:\n\n${lines.join('\n')}`;
+  const handleStartEdit = (wish: WishItem) => {
+    setEditingWishId(wish.id);
+    setEditTitle(wish.title);
+    setEditUrl(wish.url || '');
+    setEditNotes(wish.notes || '');
+    setEditingReceivedId(null);
+  };
 
-    if (typeof navigator !== 'undefined' && navigator.share) {
-      try {
-        await navigator.share({
-          title: 'My Gift Wishlist',
-          text: formatted,
-        });
-        return;
-      } catch {
-        // Fallback to clipboard
-      }
-    }
-    if (typeof navigator !== 'undefined' && navigator.clipboard) {
-      await navigator.clipboard.writeText(formatted);
-      showSnackbar('Copied formatted wishlist to clipboard!');
-    }
+  const handleSaveEdit = (e: React.FormEvent, wishId: string) => {
+    e.preventDefault();
+    if (!editTitle.trim()) return;
+    updateWish(wishId, {
+      title: editTitle.trim(),
+      url: editUrl.trim(),
+      notes: editNotes.trim(),
+    });
+    setEditingWishId(null);
+    showSnackbar('Saved changes to wish idea');
+  };
+
+  const handleCancelEdit = () => {
+    setEditingWishId(null);
   };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '18px', maxWidth: '920px' }}>
+      {/* Hero Card */}
       <div
         className="m3-hero-card"
         style={{
@@ -86,20 +117,18 @@ export function WishlistView() {
             {wantedWishes.length} Active Wishes • {receivedWishes.length} Received
           </h2>
           <p style={{ fontSize: '13.5px', color: 'var(--md-on-surface-variant)', marginTop: '2px' }}>
-            Keep ideas for yourself handy and share a clean list when family asks what you want.
+            Keep ideas for yourself handy and share a selected or full list when family asks what you want.
           </p>
         </div>
 
-        <button type="button" onClick={() => void handleShareWishlist()} className="m3-btn-filled">
-          {typeof navigator !== 'undefined' && 'share' in navigator ? (
-            <>
-              <Share2 size={15} /> Share Wishlist
-            </>
-          ) : (
-            <>
-              <Copy size={15} /> Copy Wishlist
-            </>
-          )}
+        <button
+          type="button"
+          onClick={() => setIsShareSheetOpen(true)}
+          disabled={wantedWishes.length === 0}
+          className="m3-btn-filled"
+          style={{ opacity: wantedWishes.length === 0 ? 0.6 : 1 }}
+        >
+          <Share2 size={15} /> Share Wishlist
         </button>
       </div>
 
@@ -107,27 +136,62 @@ export function WishlistView() {
       <form
         onSubmit={handleAddWish}
         className="m3-surface-card"
-        style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', alignItems: 'center' }}
+        style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}
       >
-        <input
-          type="text"
-          value={newTitle}
-          onChange={(e) => setNewTitle(e.target.value)}
-          placeholder="Add something to your wishlist (e.g., Switch 2 game, coffee beans)..."
-          className="m3-input"
-          style={{ flex: '2 1 240px' }}
-        />
-        <input
-          type="text"
-          value={newUrl}
-          onChange={(e) => setNewUrl(e.target.value)}
-          placeholder="Optional link..."
-          className="m3-input"
-          style={{ flex: '1 1 160px' }}
-        />
-        <button type="submit" className="m3-btn-filled">
-          <Plus size={16} /> Add Wish
-        </button>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', alignItems: 'center' }}>
+          <input
+            type="text"
+            value={newTitle}
+            onChange={(e) => setNewTitle(e.target.value)}
+            placeholder="Add something to your wishlist (e.g., Switch 2 game, coffee beans)..."
+            className="m3-input"
+            style={{ flex: '2 1 240px' }}
+          />
+
+          <button
+            type="button"
+            onClick={() => setShowAddDetails((prev) => !prev)}
+            className="m3-btn-tonal"
+            style={{ height: '40px', fontSize: '12.5px', flexShrink: 0 }}
+          >
+            <StickyNote size={14} />
+            {showAddDetails ? 'Hide Details' : 'Add Details'}
+            {showAddDetails ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+          </button>
+
+          <button type="submit" disabled={!newTitle.trim()} className="m3-btn-filled" style={{ height: '40px' }}>
+            <Plus size={16} /> Add Wish
+          </button>
+        </div>
+
+        {showAddDetails && (
+          <div
+            style={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: '10px',
+              paddingTop: '8px',
+              borderTop: '1px solid var(--md-outline-variant)',
+            }}
+          >
+            <input
+              type="text"
+              value={newUrl}
+              onChange={(e) => setNewUrl(e.target.value)}
+              placeholder="Optional link (e.g. https://...)..."
+              className="m3-input"
+              style={{ flex: '1 1 200px' }}
+            />
+            <input
+              type="text"
+              value={newNotes}
+              onChange={(e) => setNewNotes(e.target.value)}
+              placeholder="Optional subnotes (size, color, brand, details)..."
+              className="m3-input"
+              style={{ flex: '2 1 260px' }}
+            />
+          </div>
+        )}
       </form>
 
       {/* Segmented Filter */}
@@ -152,156 +216,282 @@ export function WishlistView() {
 
       {/* Wishes List */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-        {displayed.map((wish) => {
-          const isLogging = editingReceivedId === wish.id;
-          return (
-            <div key={wish.id} className="m3-surface-card" style={{ padding: '14px 16px' }}>
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: '12px',
-                }}
-              >
-                <div style={{ minWidth: 0 }}>
-                  <h3
-                    style={{
-                      fontSize: '15.5px',
-                      fontWeight: 700,
-                      textDecoration: wish.received ? 'line-through' : 'none',
-                      opacity: wish.received ? 0.78 : 1,
-                    }}
+        {displayed.length === 0 ? (
+          <div
+            className="m3-surface-card"
+            style={{
+              padding: '32px 20px',
+              textAlign: 'center',
+              color: 'var(--md-on-surface-variant)',
+            }}
+          >
+            <p style={{ fontSize: '14.5px' }}>
+              {filter === 'wanted'
+                ? 'Your wishlist is empty! Add an idea using the form above.'
+                : 'No received gifts logged yet.'}
+            </p>
+          </div>
+        ) : (
+          displayed.map((wish) => {
+            const isEditing = editingWishId === wish.id;
+            const isLogging = editingReceivedId === wish.id;
+
+            return (
+              <div key={wish.id} className="m3-surface-card" style={{ padding: '14px 16px' }}>
+                {isEditing ? (
+                  /* Edit Wish Inline Form */
+                  <form
+                    onSubmit={(e) => handleSaveEdit(e, wish.id)}
+                    style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}
                   >
-                    {wish.title}
-                  </h3>
-                  <div
-                    style={{
-                      display: 'flex',
-                      flexWrap: 'wrap',
-                      gap: '10px',
-                      marginTop: '3px',
-                      fontSize: '12.5px',
-                      color: 'var(--md-on-surface-variant)',
-                    }}
-                  >
-                    {wish.received && (wish.receivedFrom || wish.receivedWhen) && (
-                      <span style={{ color: 'var(--md-success)', fontWeight: 600 }}>
-                        ✓ From {wish.receivedFrom || 'Family'}
-                        {wish.receivedWhen ? ` (${wish.receivedWhen})` : ''}
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                      <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--md-primary)', textTransform: 'uppercase' }}>
+                        Edit Wish Idea
                       </span>
-                    )}
-                    {wish.url && (
-                      <a
-                        href={wish.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
+                      <button
+                        type="button"
+                        onClick={handleCancelEdit}
+                        className="m3-btn-icon"
+                        style={{ width: '28px', height: '28px' }}
+                        aria-label="Cancel edit"
+                      >
+                        <X size={15} />
+                      </button>
+                    </div>
+
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                      <input
+                        type="text"
+                        value={editTitle}
+                        onChange={(e) => setEditTitle(e.target.value)}
+                        placeholder="Wish Title (e.g. Leather boots)"
+                        required
+                        className="m3-input"
+                        style={{ flex: '2 1 220px' }}
+                      />
+                      <input
+                        type="text"
+                        value={editUrl}
+                        onChange={(e) => setEditUrl(e.target.value)}
+                        placeholder="Product URL (optional)"
+                        className="m3-input"
+                        style={{ flex: '1 1 180px' }}
+                      />
+                    </div>
+
+                    <div>
+                      <textarea
+                        rows={2}
+                        value={editNotes}
+                        onChange={(e) => setEditNotes(e.target.value)}
+                        placeholder="Subnotes & specifications (e.g., Size 10.5, dark brown, or waterproof)..."
+                        className="m3-textarea"
+                        style={{ fontSize: '13px' }}
+                      />
+                    </div>
+
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+                      <button type="button" onClick={handleCancelEdit} className="m3-btn-text" style={{ height: '34px' }}>
+                        Cancel
+                      </button>
+                      <button type="submit" className="m3-btn-filled" style={{ height: '34px' }}>
+                        Save Idea
+                      </button>
+                    </div>
+                  </form>
+                ) : (
+                  /* Normal Wish Row */
+                  <>
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'flex-start',
+                        justifyContent: 'space-between',
+                        gap: '12px',
+                      }}
+                    >
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <h3
+                          style={{
+                            fontSize: '15.5px',
+                            fontWeight: 700,
+                            textDecoration: wish.received ? 'line-through' : 'none',
+                            opacity: wish.received ? 0.78 : 1,
+                            lineHeight: 1.35,
+                          }}
+                        >
+                          {wish.title}
+                        </h3>
+
+                        {/* Subnotes display */}
+                        {wish.notes && (
+                          <div
+                            style={{
+                              marginTop: '6px',
+                              fontSize: '13px',
+                              lineHeight: '1.45',
+                              color: 'var(--md-on-surface)',
+                              background: 'var(--md-surface-container-low)',
+                              padding: '6px 10px',
+                              borderRadius: '10px',
+                              borderLeft: '3px solid var(--md-primary)',
+                              whiteSpace: 'pre-wrap',
+                            }}
+                          >
+                            {wish.notes}
+                          </div>
+                        )}
+
+                        <div
+                          style={{
+                            display: 'flex',
+                            flexWrap: 'wrap',
+                            gap: '10px',
+                            marginTop: '5px',
+                            fontSize: '12.5px',
+                            color: 'var(--md-on-surface-variant)',
+                            alignItems: 'center',
+                          }}
+                        >
+                          {wish.received && (wish.receivedFrom || wish.receivedWhen) && (
+                            <span style={{ color: 'var(--md-success)', fontWeight: 600 }}>
+                              ✓ From {wish.receivedFrom || 'Family'}
+                              {wish.receivedWhen ? ` (${wish.receivedWhen})` : ''}
+                            </span>
+                          )}
+                          {wish.url && (
+                            <a
+                              href={wish.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              style={{
+                                color: 'var(--md-primary)',
+                                fontWeight: 600,
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                              }}
+                            >
+                              <ExternalLink size={12} /> Open Link
+                            </a>
+                          )}
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+                        {!wish.received ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingReceivedId(isLogging ? null : wish.id);
+                              setFromInput('');
+                              setWhenInput('Christmas 2026');
+                            }}
+                            className="m3-btn-tonal"
+                            style={{ height: '36px', fontSize: '12.5px' }}
+                          >
+                            <Check size={14} /> Mark Received
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              updateWish(wish.id, {
+                                received: false,
+                                receivedFrom: '',
+                                receivedWhen: '',
+                              })
+                            }
+                            className="m3-btn-tonal"
+                            style={{ height: '34px', fontSize: '12px' }}
+                          >
+                            Move to Wishes
+                          </button>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={() => handleStartEdit(wish)}
+                          className="m3-btn-icon"
+                          style={{ width: '34px', height: '34px' }}
+                          aria-label="Edit wish idea"
+                          title="Edit wish idea & subnotes"
+                        >
+                          <Pencil size={14} />
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => deleteWish(wish.id)}
+                          className="m3-btn-icon"
+                          style={{ width: '34px', height: '34px' }}
+                          aria-label="Delete wish"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </div>
+
+                    {isLogging && (
+                      <div
                         style={{
-                          color: 'var(--md-primary)',
-                          fontWeight: 600,
-                          display: 'inline-flex',
+                          marginTop: '12px',
+                          paddingTop: '12px',
+                          borderTop: '1px solid var(--md-outline-variant)',
+                          display: 'flex',
+                          flexWrap: 'wrap',
+                          gap: '8px',
                           alignItems: 'center',
-                          gap: '4px',
                         }}
                       >
-                        <ExternalLink size={12} /> Link
-                      </a>
+                        <input
+                          type="text"
+                          value={fromInput}
+                          onChange={(e) => setFromInput(e.target.value)}
+                          placeholder="From who? (e.g., Alex, Dad)"
+                          className="m3-input"
+                          style={{ flex: '1 1 160px', height: '38px' }}
+                        />
+                        <input
+                          type="text"
+                          value={whenInput}
+                          onChange={(e) => setWhenInput(e.target.value)}
+                          placeholder="Occasion (e.g., Christmas 2026)"
+                          className="m3-input"
+                          style={{ flex: '1 1 160px', height: '38px' }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            updateWish(wish.id, {
+                              received: true,
+                              receivedFrom: fromInput.trim(),
+                              receivedWhen: whenInput.trim(),
+                            });
+                            setEditingReceivedId(null);
+                          }}
+                          className="m3-btn-filled"
+                          style={{ height: '38px' }}
+                        >
+                          Confirm
+                        </button>
+                      </div>
                     )}
-                  </div>
-                </div>
-
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
-                  {!wish.received ? (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setEditingReceivedId(isLogging ? null : wish.id);
-                        setFromInput('');
-                        setWhenInput('Christmas 2026');
-                      }}
-                      className="m3-btn-tonal"
-                      style={{ height: '36px', fontSize: '12.5px' }}
-                    >
-                      <Check size={14} /> Mark Received
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() =>
-                        updateWish(wish.id, {
-                          received: false,
-                          receivedFrom: '',
-                          receivedWhen: '',
-                        })
-                      }
-                      className="m3-btn-tonal"
-                      style={{ height: '34px', fontSize: '12px' }}
-                    >
-                      Move to Wishes
-                    </button>
-                  )}
-
-                  <button
-                    type="button"
-                    onClick={() => deleteWish(wish.id)}
-                    className="m3-btn-icon"
-                    style={{ width: '34px', height: '34px' }}
-                    aria-label="Delete wish"
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                </div>
+                  </>
+                )}
               </div>
-
-              {isLogging && (
-                <div
-                  style={{
-                    marginTop: '12px',
-                    paddingTop: '12px',
-                    borderTop: '1px solid var(--md-outline-variant)',
-                    display: 'flex',
-                    flexWrap: 'wrap',
-                    gap: '8px',
-                    alignItems: 'center',
-                  }}
-                >
-                  <input
-                    type="text"
-                    value={fromInput}
-                    onChange={(e) => setFromInput(e.target.value)}
-                    placeholder="From who? (e.g., Alex, Dad)"
-                    className="m3-input"
-                    style={{ flex: '1 1 160px', height: '38px' }}
-                  />
-                  <input
-                    type="text"
-                    value={whenInput}
-                    onChange={(e) => setWhenInput(e.target.value)}
-                    placeholder="Occasion (e.g., Christmas 2026)"
-                    className="m3-input"
-                    style={{ flex: '1 1 160px', height: '38px' }}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      updateWish(wish.id, {
-                        received: true,
-                        receivedFrom: fromInput.trim(),
-                        receivedWhen: whenInput.trim(),
-                      });
-                      setEditingReceivedId(null);
-                    }}
-                    className="m3-btn-filled"
-                    style={{ height: '38px' }}
-                  >
-                    Confirm
-                  </button>
-                </div>
-              )}
-            </div>
-          );
-        })}
+            );
+          })
+        )}
       </div>
+
+      {/* Share Wishlist Selection Sheet */}
+      {isShareSheetOpen && (
+        <ShareWishlistSheet
+          wishes={wantedWishes}
+          onClose={() => setIsShareSheetOpen(false)}
+        />
+      )}
     </div>
   );
 }

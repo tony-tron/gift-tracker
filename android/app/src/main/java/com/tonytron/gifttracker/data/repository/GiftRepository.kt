@@ -357,6 +357,27 @@ class GiftRepository(private val appContext: Context) {
         syncDelete("people", id)
     }
 
+    fun reorderPeople(orderedIds: List<String>) {
+        val map = _dataset.value.people.associateBy { it.id }
+        val next = mutableListOf<Person>()
+        orderedIds.forEachIndexed { idx, id ->
+            map[id]?.let {
+                val p = it.copy(order = idx)
+                next.add(p)
+                syncUpsert("people", p.id, p.toFirestoreMap())
+            }
+        }
+        _dataset.value.people.forEach { p ->
+            if (p.id !in orderedIds) {
+                val updated = p.copy(order = next.size)
+                next.add(updated)
+                syncUpsert("people", updated.id, updated.toFirestoreMap())
+            }
+        }
+        val updated = _dataset.value.copy(people = next)
+        persistAndRefreshWidget(updated)
+    }
+
     // --- Event CRUD ---
 
     fun addEvent(name: String, year: Int, occasion: String, emoji: String): GiftEvent {
@@ -378,11 +399,12 @@ class GiftRepository(private val appContext: Context) {
 
     // --- Wishes CRUD ---
 
-    fun addWish(title: String, url: String, priority: String = "medium"): WishItem {
+    fun addWish(title: String, url: String, priority: String = "medium", notes: String = ""): WishItem {
         val wish = WishItem(
             id = IdGenerator.generate("wish"),
             title = title.trim(),
             url = url.trim(),
+            notes = notes.trim(),
             priority = priority
         )
         val updated = _dataset.value.copy(wishes = listOf(wish) + _dataset.value.wishes)
