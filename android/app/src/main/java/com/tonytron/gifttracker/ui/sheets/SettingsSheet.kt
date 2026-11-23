@@ -1,7 +1,13 @@
 package com.tonytron.gifttracker.ui.sheets
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.Intent
+import android.graphics.Bitmap
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -24,11 +30,14 @@ import androidx.compose.material.icons.automirrored.rounded.Logout
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Cloud
 import androidx.compose.material.icons.rounded.CloudUpload
+import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.DeleteSweep
 import androidx.compose.material.icons.rounded.FileDownload
 import androidx.compose.material.icons.rounded.FileUpload
 import androidx.compose.material.icons.rounded.Palette
+import androidx.compose.material.icons.rounded.QrCode2
 import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.Storage
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -54,12 +63,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.EncodeHintType
+import com.google.zxing.qrcode.QRCodeWriter
 import com.tonytron.gifttracker.data.model.ColorMode
 import com.tonytron.gifttracker.data.model.SyncStatus
 import com.tonytron.gifttracker.data.model.ThemeSeed
@@ -82,8 +96,12 @@ fun SettingsSheet(
     var webClientIdInput by remember(cloudState.webClientId) {
         mutableStateOf(cloudState.webClientId.orEmpty())
     }
+    var webAppUrlInput by remember(prefs.webAppUrl) {
+        mutableStateOf(prefs.webAppUrl.orEmpty())
+    }
     var configError by remember { mutableStateOf<String?>(null) }
     var showConfigEditor by remember { mutableStateOf(false) }
+    var showPairPanel by remember { mutableStateOf(false) }
     var confirmResetOpen by remember { mutableStateOf(false) }
 
     // Android Storage Access Framework — Export JSON Backup to Drive or Downloads
@@ -310,12 +328,34 @@ fun SettingsSheet(
                                 ) {
                                     Text("Anonymous Sync")
                                 }
+                                if (cloudState.exportableConfig != null) {
+                                    FilledTonalButton(onClick = { showPairPanel = !showPairPanel }) {
+                                        Icon(Icons.Rounded.QrCode2, null, Modifier.size(16.dp))
+                                        Spacer(Modifier.width(6.dp))
+                                        Text(if (showPairPanel) "Hide QR" else "Pair Device")
+                                    }
+                                }
                             }
                         } else {
                             FlowRow(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
+                                if (cloudState.exportableConfig != null) {
+                                    if (showPairPanel) {
+                                        Button(onClick = { showPairPanel = false }) {
+                                            Icon(Icons.Rounded.QrCode2, null, Modifier.size(16.dp))
+                                            Spacer(Modifier.width(6.dp))
+                                            Text("Hide Pairing QR")
+                                        }
+                                    } else {
+                                        FilledTonalButton(onClick = { showPairPanel = true }) {
+                                            Icon(Icons.Rounded.QrCode2, null, Modifier.size(16.dp))
+                                            Spacer(Modifier.width(6.dp))
+                                            Text("Pair Device / Invite")
+                                        }
+                                    }
+                                }
                                 FilledTonalButton(onClick = { viewModel.pushLocalToCloud() }) {
                                     Icon(Icons.Rounded.CloudUpload, null, Modifier.size(16.dp))
                                     Spacer(Modifier.width(6.dp))
@@ -329,6 +369,109 @@ fun SettingsSheet(
                             }
                         }
 
+                        val exportCfg = cloudState.exportableConfig
+                        if (showPairPanel && exportCfg != null) {
+                            val pairingLink = remember(exportCfg, webAppUrlInput) {
+                                FirebaseSyncManager.buildPairingLink(exportCfg, webAppUrlInput)
+                            }
+                            val qrBitmap = remember(pairingLink) {
+                                generateQrImageBitmap(pairingLink)
+                            }
+
+                            Surface(
+                                shape = RoundedCornerShape(18.dp),
+                                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(14.dp),
+                                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    Text(
+                                        "Pair Another Device or Invite a Friend",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        "Scan this QR code or share the link to configure Cloud Sync automatically. Friends who sign in with their own Google account get their own private, isolated workspace.",
+                                        fontSize = 12.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+
+                                    if (qrBitmap != null) {
+                                        Box(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Surface(
+                                                shape = RoundedCornerShape(16.dp),
+                                                color = Color.White,
+                                                shadowElevation = 3.dp
+                                            ) {
+                                                Image(
+                                                    bitmap = qrBitmap,
+                                                    contentDescription = "Firebase Pairing QR Code",
+                                                    modifier = Modifier
+                                                        .padding(10.dp)
+                                                        .size(180.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    OutlinedTextField(
+                                        value = webAppUrlInput,
+                                        onValueChange = { webAppUrlInput = it },
+                                        label = { Text("Optional: Hosted Web App URL (for Web + Android link)") },
+                                        placeholder = { Text("https://your-gift-tracker.web.app") },
+                                        singleLine = true,
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+
+                                    FlowRow(
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Button(
+                                            onClick = {
+                                                viewModel.setWebAppUrl(webAppUrlInput)
+                                                val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                                                    type = "text/plain"
+                                                    putExtra(Intent.EXTRA_SUBJECT, "Gift Tracker — Cloud Sync Setup")
+                                                    putExtra(
+                                                        Intent.EXTRA_TEXT,
+                                                        "Open this link to connect Gift Tracker and sign in with your own Google account:\n$pairingLink"
+                                                    )
+                                                }
+                                                context.startActivity(
+                                                    Intent.createChooser(sendIntent, "Share Gift Tracker Setup")
+                                                )
+                                            }
+                                        ) {
+                                            Icon(Icons.Rounded.Share, null, Modifier.size(16.dp))
+                                            Spacer(Modifier.width(6.dp))
+                                            Text("Share Link")
+                                        }
+
+                                        FilledTonalButton(
+                                            onClick = {
+                                                viewModel.setWebAppUrl(webAppUrlInput)
+                                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                                clipboard.setPrimaryClip(
+                                                    ClipData.newPlainText("Gift Tracker Pairing Link", pairingLink)
+                                                )
+                                                viewModel.showMessage("Copied pairing link to clipboard!")
+                                            }
+                                        ) {
+                                            Icon(Icons.Rounded.ContentCopy, null, Modifier.size(16.dp))
+                                            Spacer(Modifier.width(6.dp))
+                                            Text("Copy Link")
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
                         if (!cloudState.isFromGoogleServicesResource) {
                             TextButton(onClick = { showConfigEditor = !showConfigEditor }) {
                                 Text(if (showConfigEditor) "Hide config editor" else "Change Firebase config")
@@ -336,7 +479,7 @@ fun SettingsSheet(
                         }
                     } else {
                         Text(
-                            "Data is stored locally on this device (and updates your Home Screen Widget). To sync live with the Web App, paste your Firebase config or google-services.json below.",
+                            "Data is stored locally on this device (and updates your Home Screen Widget). To sync live across devices, open a pairing link or paste firebaseConfig / google-services.json below.",
                             fontSize = 12.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -346,8 +489,8 @@ fun SettingsSheet(
                         OutlinedTextField(
                             value = snippetInput,
                             onValueChange = { snippetInput = it },
-                            label = { Text("Paste firebaseConfig or google-services.json") },
-                            placeholder = { Text("const firebaseConfig = { apiKey: \"...\", projectId: \"gift-tracker-3018d\" };") },
+                            label = { Text("Paste pairing link, firebaseConfig, or google-services.json") },
+                            placeholder = { Text("https://.../?pair=... or const firebaseConfig = { ... }") },
                             minLines = 3,
                             maxLines = 6,
                             textStyle = MaterialTheme.typography.bodyMedium.copy(
@@ -379,15 +522,19 @@ fun SettingsSheet(
                             }
                             Button(
                                 onClick = {
+                                    val decodedPair = FirebaseSyncManager.decodePairingToken(snippetInput)
                                     val parsed = FirebaseSyncManager.parseFirebaseSnippet(
                                         input = snippetInput,
                                         webClientIdOverride = webClientIdInput,
                                         targetPackageName = context.packageName
                                     )
                                     if (parsed == null) {
-                                        configError = "Could not find apiKey and projectId. Paste firebaseConfig or google-services.json."
+                                        configError = "Could not find apiKey and projectId. Paste a pairing link, firebaseConfig, or google-services.json."
                                     } else {
                                         configError = null
+                                        if (!decodedPair?.webUrl.isNullOrBlank()) {
+                                            viewModel.setWebAppUrl(decodedPair.webUrl)
+                                        }
                                         viewModel.connectFirebaseConfig(parsed)
                                         snippetInput = ""
                                         showConfigEditor = false
@@ -478,3 +625,21 @@ fun SettingsSheet(
         )
     }
 }
+
+private fun generateQrImageBitmap(content: String, sizePx: Int = 512): ImageBitmap? = runCatching {
+    val hints = mapOf(
+        EncodeHintType.MARGIN to 1,
+        EncodeHintType.CHARACTER_SET to "UTF-8"
+    )
+    val matrix = QRCodeWriter().encode(content, BarcodeFormat.QR_CODE, sizePx, sizePx, hints)
+    val pixels = IntArray(sizePx * sizePx)
+    val dark = android.graphics.Color.rgb(20, 18, 24)
+    val light = android.graphics.Color.WHITE
+    for (y in 0 until sizePx) {
+        val offset = y * sizePx
+        for (x in 0 until sizePx) {
+            pixels[offset + x] = if (matrix.get(x, y)) dark else light
+        }
+    }
+    Bitmap.createBitmap(pixels, sizePx, sizePx, Bitmap.Config.ARGB_8888).asImageBitmap()
+}.getOrNull()

@@ -13,7 +13,9 @@ import type { User } from 'firebase/auth';
 import { EMPTY_DATASET } from '@/lib/seedData';
 import {
   checkRemoteHasData,
+  decodeFirebasePairingToken,
   deleteRemoteDoc,
+  encodeFirebasePairingToken,
   getSavedFirebaseConfig,
   initFirebaseServices,
   observeAuth,
@@ -76,11 +78,13 @@ interface GiftStoreContextValue {
   colorMode: ColorMode;
   setColorMode: (mode: ColorMode) => void;
 
-  // Firebase Cloud Sync
+  // Firebase Cloud Sync & QR/Link Pairing
   syncStatus: SyncStatus;
   syncError: string | null;
   firebaseUser: User | null;
   firebaseConfig: FirebaseClientConfig | null;
+  incomingPairToken: string | null;
+  dismissIncomingPair: () => void;
   connectFirebaseConfig: (cfg: FirebaseClientConfig | null) => Promise<void>;
   loginGoogle: () => Promise<void>;
   loginAnonymousSync: () => Promise<void>;
@@ -207,12 +211,17 @@ export function GiftStoreProvider({ children }: { children: React.ReactNode }) {
   const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
   const [remoteSyncState, setRemoteSyncState] = useState<SyncStatus>('signed-out');
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [incomingPairToken, setIncomingPairToken] = useState<string | null>(null);
 
   const [snackbar, setSnackbar] = useState<SnackbarMessage | null>(null);
   const snackbarTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const datasetRef = useRef<GiftDataset>(dataset);
 
   const syncStatus: SyncStatus = firebaseConfig ? remoteSyncState : 'local-only';
+
+  const dismissIncomingPair = useCallback(() => {
+    setIncomingPairToken(null);
+  }, []);
 
   const showSnackbar = useCallback(
     (text: string, actionLabel?: string, onAction?: () => void) => {
@@ -229,6 +238,44 @@ export function GiftStoreProvider({ children }: { children: React.ReactNode }) {
     if (snackbarTimerRef.current) clearTimeout(snackbarTimerRef.current);
     setSnackbar(null);
   }, []);
+
+  // Automatically ingest ?pair=<token> (or ?cfg=<token>) device-pairing links
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const url = new URL(window.location.href);
+    const rawPair = url.searchParams.get('pair') || url.searchParams.get('cfg');
+    if (!rawPair) return;
+
+    // Clean the pairing token from the browser URL bar immediately
+    url.searchParams.delete('pair');
+    url.searchParams.delete('cfg');
+    const cleanSearch = url.searchParams.toString();
+    const cleanRelative = `${url.pathname}${cleanSearch ? `?${cleanSearch}` : ''}${url.hash}`;
+    window.history.replaceState({}, '', cleanRelative);
+
+    const decoded = decodeFirebasePairingToken(rawPair);
+    void (async () => {
+      await Promise.resolve();
+      if (!decoded) {
+        showSnackbar('Invalid or expired Firebase pairing link.');
+        return;
+      }
+
+      const cleanToken = encodeFirebasePairingToken(decoded.config, window.location.origin);
+      const existing = getSavedFirebaseConfig();
+      const sameProject =
+        existing?.projectId === decoded.config.projectId &&
+        existing?.apiKey === decoded.config.apiKey;
+      await saveRuntimeFirebaseConfig(decoded.config);
+      setFirebaseConfig(getSavedFirebaseConfig());
+      if (!sameProject) {
+        setFirebaseUser(null);
+        setRemoteSyncState('signed-out');
+      }
+      setSyncError(null);
+      setIncomingPairToken(cleanToken);
+    })();
+  }, [showSnackbar]);
 
   // Persist dataset locally & keep latest ref synchronized
   useEffect(() => {
@@ -340,13 +387,24 @@ export function GiftStoreProvider({ children }: { children: React.ReactNode }) {
   // Firebase Auth & Config Actions
   const connectFirebaseConfig = useCallback(
     async (cfg: FirebaseClientConfig | null) => {
+      const existing = getSavedFirebaseConfig();
+      const sameProject =
+        Boolean(cfg) &&
+        existing?.projectId === cfg?.projectId &&
+        existing?.apiKey === cfg?.apiKey;
       await saveRuntimeFirebaseConfig(cfg);
       setFirebaseConfig(getSavedFirebaseConfig());
-      setFirebaseUser(null);
-      setRemoteSyncState('signed-out');
+      if (!sameProject) {
+        setFirebaseUser(null);
+        setRemoteSyncState('signed-out');
+      }
       setSyncError(null);
       if (cfg) {
-        showSnackbar('Firebase project connected! Sign in to start real-time sync.');
+        showSnackbar(
+          sameProject
+            ? 'Updated Firebase pairing metadata!'
+            : 'Firebase project connected! Sign in to start real-time sync.'
+        );
       } else {
         showSnackbar('Disconnected runtime Firebase configuration.');
       }
@@ -863,6 +921,8 @@ export function GiftStoreProvider({ children }: { children: React.ReactNode }) {
       syncError,
       firebaseUser,
       firebaseConfig,
+      incomingPairToken,
+      dismissIncomingPair,
       connectFirebaseConfig,
       loginGoogle,
       loginAnonymousSync,
@@ -903,6 +963,8 @@ export function GiftStoreProvider({ children }: { children: React.ReactNode }) {
       syncError,
       firebaseUser,
       firebaseConfig,
+      incomingPairToken,
+      dismissIncomingPair,
       connectFirebaseConfig,
       loginGoogle,
       loginAnonymousSync,

@@ -286,10 +286,45 @@ class GiftTrackerViewModel(application: Application) : AndroidViewModel(applicat
         viewModelScope.launch { repository.setColorMode(mode) }
     }
 
+    fun setWebAppUrl(url: String?) {
+        viewModelScope.launch { repository.setWebAppUrl(url) }
+    }
+
     fun connectFirebaseConfig(config: FirebaseRuntimeConfig?) {
         viewModelScope.launch {
             repository.saveRuntimeFirebaseConfig(config)
             showMessage(if (config != null) "Connected to Firebase (${config.projectId})" else "Cleared runtime Firebase config")
+        }
+    }
+
+    fun handleIncomingPairingUri(uri: android.net.Uri) {
+        val decoded = com.tonytron.gifttracker.data.remote.FirebaseSyncManager.decodePairingToken(uri.toString())
+            ?: uri.getQueryParameter("cfg")?.let { com.tonytron.gifttracker.data.remote.FirebaseSyncManager.decodePairingToken(it) }
+            ?: uri.getQueryParameter("pair")?.let { com.tonytron.gifttracker.data.remote.FirebaseSyncManager.decodePairingToken(it) }
+
+        if (decoded == null) {
+            showMessage("Invalid or expired Firebase pairing link")
+            return
+        }
+
+        viewModelScope.launch {
+            if (!decoded.webUrl.isNullOrBlank()) {
+                repository.setWebAppUrl(decoded.webUrl)
+            }
+            val currentCloud = cloudState.value
+            val alreadyBuiltInSameProject =
+                currentCloud.isFromGoogleServicesResource &&
+                    currentCloud.connectedProjectId == decoded.config.projectId
+
+            if (!alreadyBuiltInSameProject) {
+                repository.saveRuntimeFirebaseConfig(decoded.config)
+            }
+            openSettings()
+            if (currentCloud.userUid != null && currentCloud.connectedProjectId == decoded.config.projectId) {
+                showMessage("Already synced with ${decoded.config.projectId}!")
+            } else {
+                showMessage("Connected to ${decoded.config.projectId} — tap Sign in with Google!")
+            }
         }
     }
 

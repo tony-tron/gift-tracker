@@ -45,60 +45,251 @@ export function getEnvFirebaseConfig(): FirebaseClientConfig | null {
   const apiKey = process.env.NEXT_PUBLIC_FIREBASE_API_KEY;
   const authDomain = process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN;
   const projectId = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
-  if (apiKey && authDomain && projectId) {
+  if (apiKey && projectId) {
     return {
       apiKey,
-      authDomain,
+      authDomain: authDomain || `${projectId}.firebaseapp.com`,
       projectId,
       storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
       messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
       appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
+      webClientId: process.env.NEXT_PUBLIC_FIREBASE_WEB_CLIENT_ID,
     };
   }
   return null;
 }
 
 export function getSavedFirebaseConfig(): FirebaseClientConfig | null {
-  const envCfg = getEnvFirebaseConfig();
-  if (envCfg) return envCfg;
-  if (typeof window === 'undefined') return null;
-  try {
-    const raw = window.localStorage.getItem(RUNTIME_CONFIG_STORAGE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as Partial<FirebaseClientConfig>;
-    if (parsed.apiKey && parsed.projectId) {
-      return {
-        apiKey: parsed.apiKey.trim(),
-        authDomain: (parsed.authDomain || `${parsed.projectId.trim()}.firebaseapp.com`).trim(),
-        projectId: parsed.projectId.trim(),
-        storageBucket: parsed.storageBucket?.trim(),
-        messagingSenderId: parsed.messagingSenderId?.trim(),
-        appId: parsed.appId?.trim(),
-      };
+  let runtimeParsed: Partial<FirebaseClientConfig> | null = null;
+  if (typeof window !== 'undefined') {
+    try {
+      const raw = window.localStorage.getItem(RUNTIME_CONFIG_STORAGE_KEY);
+      if (raw) {
+        runtimeParsed = JSON.parse(raw) as Partial<FirebaseClientConfig>;
+      }
+    } catch {
+      runtimeParsed = null;
     }
+  }
+
+  const envCfg = getEnvFirebaseConfig();
+  if (envCfg) {
+    // Allow optional runtime webClientId override if set on the same project
+    if (
+      runtimeParsed &&
+      (!runtimeParsed.projectId || runtimeParsed.projectId.trim() === envCfg.projectId) &&
+      runtimeParsed.webClientId?.trim() &&
+      !envCfg.webClientId
+    ) {
+      return { ...envCfg, webClientId: runtimeParsed.webClientId.trim() };
+    }
+    return envCfg;
+  }
+
+  if (runtimeParsed?.apiKey && runtimeParsed?.projectId) {
+    return {
+      apiKey: runtimeParsed.apiKey.trim(),
+      authDomain: (runtimeParsed.authDomain || `${runtimeParsed.projectId.trim()}.firebaseapp.com`).trim(),
+      projectId: runtimeParsed.projectId.trim(),
+      storageBucket: runtimeParsed.storageBucket?.trim(),
+      messagingSenderId: runtimeParsed.messagingSenderId?.trim(),
+      appId: runtimeParsed.appId?.trim(),
+      webClientId: runtimeParsed.webClientId?.trim(),
+    };
+  }
+  return null;
+}
+
+function toBase64Url(str: string): string {
+  const bytes = new TextEncoder().encode(str);
+  let binary = '';
+  bytes.forEach((b) => {
+    binary += String.fromCharCode(b);
+  });
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function fromBase64Url(token: string): string | null {
+  try {
+    const normalized = token.trim().replace(/-/g, '+').replace(/_/g, '/');
+    const padLen = (4 - (normalized.length % 4)) % 4;
+    const padded = normalized + '='.repeat(padLen);
+    const binary = atob(padded);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return new TextDecoder().decode(bytes);
   } catch {
     return null;
   }
-  return null;
+}
+
+export interface DecodedPairingPayload {
+  config: FirebaseClientConfig;
+  webUrl?: string;
+}
+
+export function encodeFirebasePairingToken(config: FirebaseClientConfig, webUrl?: string): string {
+  const payload: Record<string, unknown> = {
+    v: 1,
+    apiKey: config.apiKey.trim(),
+    projectId: config.projectId.trim(),
+    authDomain: (config.authDomain || `${config.projectId.trim()}.firebaseapp.com`).trim(),
+  };
+  if (config.storageBucket?.trim()) payload.storageBucket = config.storageBucket.trim();
+  if (config.messagingSenderId?.trim()) payload.messagingSenderId = config.messagingSenderId.trim();
+  if (config.appId?.trim()) payload.appId = config.appId.trim();
+  if (config.webClientId?.trim()) payload.webClientId = config.webClientId.trim();
+  if (webUrl?.trim()) payload.webUrl = webUrl.trim();
+  return toBase64Url(JSON.stringify(payload));
+}
+
+export function decodeFirebasePairingToken(rawInput: string): DecodedPairingPayload | null {
+  const trimmed = rawInput.trim();
+  if (!trimmed) return null;
+
+  let candidate = trimmed;
+  let inferredWebUrl: string | undefined;
+
+  if (/^(https?:\/\/|gifttracker:\/\/)/i.test(trimmed)) {
+    try {
+      const url = new URL(trimmed);
+      const param = url.searchParams.get('pair') || url.searchParams.get('cfg');
+      if (!param) return null;
+      candidate = param;
+      if (url.protocol === 'http:' || url.protocol === 'https:') {
+        inferredWebUrl = url.origin;
+      }
+    } catch {
+      return null;
+    }
+  }
+
+  const decodedJson = fromBase64Url(candidate);
+  if (!decodedJson) return null;
+
+  try {
+    const parsed = JSON.parse(decodedJson) as Record<string, unknown>;
+    const apiKey = typeof parsed.apiKey === 'string' ? parsed.apiKey.trim() : '';
+    const projectId = typeof parsed.projectId === 'string' ? parsed.projectId.trim() : '';
+    if (!apiKey || !projectId) return null;
+
+    const str = (key: string): string | undefined => {
+      const v = parsed[key];
+      return typeof v === 'string' && v.trim() ? v.trim() : undefined;
+    };
+
+    return {
+      config: {
+        apiKey,
+        projectId,
+        authDomain: str('authDomain') || `${projectId}.firebaseapp.com`,
+        storageBucket: str('storageBucket'),
+        messagingSenderId: str('messagingSenderId') || str('gcmSenderId'),
+        appId: str('appId') || str('applicationId'),
+        webClientId: str('webClientId'),
+      },
+      webUrl: str('webUrl') || inferredWebUrl,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function buildWebPairingUrl(config: FirebaseClientConfig, originOverride?: string): string {
+  const origin =
+    originOverride?.replace(/\/+$/, '') ||
+    (typeof window !== 'undefined' ? window.location.origin : 'https://localhost:3000');
+  const token = encodeFirebasePairingToken(config, origin);
+  return `${origin}/?pair=${encodeURIComponent(token)}`;
+}
+
+export function buildAndroidPairingDeepLink(
+  config: FirebaseClientConfig,
+  originOverride?: string
+): string {
+  const origin =
+    originOverride?.replace(/\/+$/, '') ||
+    (typeof window !== 'undefined' ? window.location.origin : undefined);
+  const token = encodeFirebasePairingToken(config, origin);
+  return `gifttracker://pair?cfg=${encodeURIComponent(token)}`;
 }
 
 export function parseFirebaseSnippet(input: string): FirebaseClientConfig | null {
   const trimmed = input.trim();
   if (!trimmed) return null;
+
+  // 1. Check if input is a pairing URL or base64url pairing token
+  const fromToken = decodeFirebasePairingToken(trimmed);
+  if (fromToken) return fromToken.config;
+
   try {
-    const direct = JSON.parse(trimmed) as Partial<FirebaseClientConfig>;
+    const rawObj = JSON.parse(trimmed) as Record<string, unknown>;
+
+    // 2. Check if Android google-services.json was pasted directly
+    if (
+      rawObj.project_info &&
+      typeof rawObj.project_info === 'object' &&
+      Array.isArray(rawObj.client)
+    ) {
+      const pInfo = rawObj.project_info as Record<string, unknown>;
+      const projectId = typeof pInfo.project_id === 'string' ? pInfo.project_id.trim() : '';
+      const storageBucket =
+        typeof pInfo.storage_bucket === 'string' ? pInfo.storage_bucket.trim() : undefined;
+      const messagingSenderId =
+        typeof pInfo.project_number === 'string' ? pInfo.project_number.trim() : undefined;
+      const firstClient = rawObj.client[0] as Record<string, unknown> | undefined;
+      const clientInfo = firstClient?.client_info as Record<string, unknown> | undefined;
+      const appId =
+        typeof clientInfo?.mobilesdk_app_id === 'string'
+          ? clientInfo.mobilesdk_app_id.trim()
+          : undefined;
+      const apiKeyArr = Array.isArray(firstClient?.api_key) ? firstClient.api_key : [];
+      const apiKeyObj = apiKeyArr[0] as Record<string, unknown> | undefined;
+      const apiKey =
+        typeof apiKeyObj?.current_key === 'string' ? apiKeyObj.current_key.trim() : '';
+
+      let webClientId: string | undefined;
+      for (const c of rawObj.client as Array<Record<string, unknown>>) {
+        const oauthList = Array.isArray(c?.oauth_client)
+          ? (c.oauth_client as Array<Record<string, unknown>>)
+          : [];
+        const found = oauthList.find((o) => String(o?.client_type) === '3');
+        if (found && typeof found.client_id === 'string') {
+          webClientId = found.client_id.trim();
+          break;
+        }
+      }
+
+      if (apiKey && projectId) {
+        return {
+          apiKey,
+          authDomain: `${projectId}.firebaseapp.com`,
+          projectId,
+          storageBucket,
+          messagingSenderId,
+          appId,
+          webClientId,
+        };
+      }
+    }
+
+    // 3. Direct JSON firebaseConfig object
+    const direct = rawObj as Partial<FirebaseClientConfig>;
     if (direct.apiKey && direct.projectId) {
       return {
-        apiKey: direct.apiKey,
-        authDomain: direct.authDomain || `${direct.projectId}.firebaseapp.com`,
-        projectId: direct.projectId,
-        storageBucket: direct.storageBucket,
-        messagingSenderId: direct.messagingSenderId,
-        appId: direct.appId,
+        apiKey: direct.apiKey.trim(),
+        authDomain: (direct.authDomain || `${direct.projectId}.firebaseapp.com`).trim(),
+        projectId: direct.projectId.trim(),
+        storageBucket: direct.storageBucket?.trim(),
+        messagingSenderId: direct.messagingSenderId?.trim(),
+        appId: direct.appId?.trim(),
+        webClientId: direct.webClientId?.trim(),
       };
     }
   } catch {
-    // Parse JS object snippet from Firebase Console (e.g. const firebaseConfig = { apiKey: "...", ... })
+    // 4. Parse JS object snippet from Firebase Console (e.g. const firebaseConfig = { apiKey: "...", ... })
     const extract = (key: string): string | undefined => {
       const re = new RegExp(`${key}\\s*:\\s*["'\`]([^"'\`]+)["'\`]`);
       const m = trimmed.match(re);
@@ -114,6 +305,7 @@ export function parseFirebaseSnippet(input: string): FirebaseClientConfig | null
         storageBucket: extract('storageBucket'),
         messagingSenderId: extract('messagingSenderId'),
         appId: extract('appId'),
+        webClientId: extract('webClientId'),
       };
     }
   }
@@ -122,12 +314,13 @@ export function parseFirebaseSnippet(input: string): FirebaseClientConfig | null
 
 export async function saveRuntimeFirebaseConfig(config: FirebaseClientConfig | null): Promise<void> {
   if (typeof window === 'undefined') return;
+  const nextHash = config ? `${config.projectId}:${config.apiKey}` : '';
   if (!config) {
     window.localStorage.removeItem(RUNTIME_CONFIG_STORAGE_KEY);
   } else {
     window.localStorage.setItem(RUNTIME_CONFIG_STORAGE_KEY, JSON.stringify(config));
   }
-  if (appInstance) {
+  if (appInstance && nextHash !== activeConfigHash) {
     try {
       await deleteApp(appInstance);
     } catch {

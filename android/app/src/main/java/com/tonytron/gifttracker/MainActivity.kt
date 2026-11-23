@@ -51,6 +51,11 @@ class MainActivity : ComponentActivity() {
     private fun handleLaunchIntent(intent: Intent?) {
         if (intent == null) return
         when {
+            intent.action == Intent.ACTION_VIEW &&
+                intent.data?.scheme.equals("gifttracker", ignoreCase = true) &&
+                intent.data?.host.equals("pair", ignoreCase = true) -> {
+                intent.data?.let { viewModel.handleIncomingPairingUri(it) }
+            }
             intent.action == Intent.ACTION_SEND && intent.type == "text/plain" -> {
                 val sharedText = intent.getStringExtra(Intent.EXTRA_TEXT)
                 val sharedSubject = intent.getStringExtra(Intent.EXTRA_SUBJECT)

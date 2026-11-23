@@ -3,9 +3,13 @@
 import React, { useMemo, useState } from 'react';
 import {
   CalendarHeart,
+  Check,
+  Cloud,
   Lightbulb,
+  LogIn,
   Plus,
   Settings,
+  Smartphone,
   Sparkles,
   Star,
   Users,
@@ -44,6 +48,13 @@ export function GiftTrackerApp({ initialSharedDraft }: GiftTrackerAppProps) {
     setActiveTab,
     selectedEventId,
     syncStatus,
+    syncError,
+    firebaseConfig,
+    firebaseUser,
+    incomingPairToken,
+    dismissIncomingPair,
+    loginGoogle,
+    loginAnonymousSync,
     snackbar,
     dismissSnackbar,
   } = useGiftStore();
@@ -367,6 +378,154 @@ export function GiftTrackerApp({ initialSharedDraft }: GiftTrackerAppProps) {
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
       />
+
+      {incomingPairToken && firebaseConfig && (
+        <div
+          className="m3-scrim"
+          onClick={dismissIncomingPair}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Cloud Sync Setup Ready"
+        >
+          <div
+            className="m3-sheet"
+            onClick={(e) => e.stopPropagation()}
+            style={{ maxWidth: '480px', display: 'flex', flexDirection: 'column', gap: '16px' }}
+          >
+            <div className="m3-drag-handle" />
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                justifyContent: 'space-between',
+                gap: '12px',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div
+                  className="m3-avatar"
+                  data-shape="squircle"
+                  data-tone="teal"
+                  style={{ width: '40px', height: '40px', flexShrink: 0 }}
+                >
+                  <Cloud size={19} />
+                </div>
+                <div>
+                  <span
+                    style={{
+                      fontSize: '11px',
+                      fontWeight: 700,
+                      color: 'var(--md-primary)',
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.06em',
+                    }}
+                  >
+                    Cloud Sync Paired
+                  </span>
+                  <h2 style={{ fontSize: '19px', fontWeight: 800, marginTop: '1px' }}>
+                    Connected to {firebaseConfig.projectId}
+                  </h2>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={dismissIncomingPair}
+                className="m3-btn-icon"
+                aria-label="Close"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <p style={{ fontSize: '13.5px', color: 'var(--md-on-surface-variant)', lineHeight: 1.5 }}>
+              Firebase Cloud Sync is now configured on this browser. Sign in with your Google
+              account to sync across your devices — each Google account gets its own private,
+              isolated Gift Tracker workspace.
+            </p>
+
+            {firebaseUser ? (
+              <div
+                style={{
+                  background: 'var(--md-success-container)',
+                  color: 'var(--md-on-success-container)',
+                  padding: '12px 14px',
+                  borderRadius: '16px',
+                  fontSize: '13px',
+                  fontWeight: 700,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                }}
+              >
+                <Check size={16} />
+                <span>
+                  Signed in as {firebaseUser.email || firebaseUser.displayName || 'Cloud User'}
+                </span>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      await loginGoogle();
+                      dismissIncomingPair();
+                    } catch {
+                      // Error shown below
+                    }
+                  }}
+                  className="m3-btn-filled"
+                  style={{ flex: '1 1 200px', justifyContent: 'center' }}
+                >
+                  <LogIn size={16} /> Sign in with Google
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      await loginAnonymousSync();
+                      dismissIncomingPair();
+                    } catch {
+                      // Error shown below
+                    }
+                  }}
+                  className="m3-btn-tonal"
+                >
+                  Anonymous Sync
+                </button>
+              </div>
+            )}
+
+            {syncError && (
+              <p style={{ fontSize: '12px', color: 'var(--md-danger)' }}>{syncError}</p>
+            )}
+
+            <div
+              style={{
+                borderTop: '1px solid var(--md-outline-variant)',
+                paddingTop: '12px',
+                display: 'flex',
+                flexWrap: 'wrap',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '10px',
+              }}
+            >
+              <a
+                href={`gifttracker://pair?cfg=${encodeURIComponent(incomingPairToken)}`}
+                className="m3-btn-tonal"
+                style={{ textDecoration: 'none', fontSize: '12.5px' }}
+              >
+                <Smartphone size={15} /> Open in Android App
+              </a>
+
+              <button type="button" onClick={dismissIncomingPair} className="m3-btn-text">
+                {firebaseUser ? 'Done' : 'Later'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* EXPRESSIVE SNACKBAR */}
       {snackbar && (

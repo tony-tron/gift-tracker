@@ -23,7 +23,8 @@ data class UserPreferences(
     val themeSeed: ThemeSeed = ThemeSeed.DYNAMIC,
     val colorMode: ColorMode = ColorMode.SYSTEM,
     val selectedEventId: String = "2026-christmas",
-    val runtimeFirebaseConfig: FirebaseRuntimeConfig? = null
+    val runtimeFirebaseConfig: FirebaseRuntimeConfig? = null,
+    val webAppUrl: String? = null
 )
 
 class LocalGiftStorage(private val context: Context) {
@@ -57,7 +58,8 @@ class LocalGiftStorage(private val context: Context) {
             themeSeed = ThemeSeed.fromKey(prefs[KEY_THEME_SEED]),
             colorMode = ColorMode.fromKey(prefs[KEY_COLOR_MODE]),
             selectedEventId = prefs[KEY_SELECTED_EVENT] ?: "2026-christmas",
-            runtimeFirebaseConfig = fbCfg
+            runtimeFirebaseConfig = fbCfg,
+            webAppUrl = prefs[KEY_WEB_APP_URL]?.takeIf { it.isNotBlank() }
         )
     }
 
@@ -109,6 +111,17 @@ class LocalGiftStorage(private val context: Context) {
         }
     }
 
+    suspend fun setWebAppUrl(url: String?) {
+        context.appDataStore.edit { prefs ->
+            val clean = url?.trim()?.trimEnd('/')
+            if (clean.isNullOrBlank()) {
+                prefs.remove(KEY_WEB_APP_URL)
+            } else {
+                prefs[KEY_WEB_APP_URL] = clean
+            }
+        }
+    }
+
     companion object {
         const val DATASET_FILENAME = "gift_tracker_dataset_v1.json"
 
@@ -116,6 +129,7 @@ class LocalGiftStorage(private val context: Context) {
         private val KEY_COLOR_MODE = stringPreferencesKey("color_mode")
         private val KEY_SELECTED_EVENT = stringPreferencesKey("selected_event_id")
         private val KEY_FIREBASE_CONFIG = stringPreferencesKey("firebase_runtime_config")
+        private val KEY_WEB_APP_URL = stringPreferencesKey("web_app_url")
 
         /**
          * Fast helper also used by the Glance AppWidget process/coroutine to render the latest snapshot.

@@ -32,13 +32,15 @@ cd android
 
 ## Connecting Firebase Cloud Sync
 
-You can connect Firebase in **two ways**:
+You can connect Firebase in **three ways**:
 
-1. **Zero-Rebuild Runtime Config (Easiest)**:
-   - Install the APK, tap the **Settings** gear icon → **Cloud Sync**, and paste either your Web `firebaseConfig` snippet or your `google-services.json` content.
-2. **Build-Time `google-services.json`**:
+1. **Pre-Wired APKs via `google-services.json` (Zero-Config on New Phones)**:
    - Register package name `com.tonytron.gifttracker` (and your signing key SHA-1 / SHA-256 for Google Sign-In) in Firebase Console → **Project Settings → Your apps**.
-   - Place `google-services.json` in `android/app/google-services.json` (git-ignored automatically) and build.
+   - Place `google-services.json` in `android/app/google-services.json` locally (git-ignored) **or** save its contents as a `GOOGLE_SERVICES_JSON` (or `GOOGLE_SERVICES_JSON_BASE64`) GitHub Secret so CI release APKs sign in with Google immediately on any new phone.
+2. **1-Scan QR Code / Deep-Link Pairing (`gifttracker://pair`)**:
+   - From any already-connected Web or Android device, open **Settings → Cloud Sync → Pair Device / Invite** and scan the QR code or open the shared pairing link (friends who sign in with their own Google account get a separate, private workspace).
+3. **Zero-Rebuild Runtime Paste**:
+   - Tap **Settings → Cloud Sync**, and paste a pairing link, Web `firebaseConfig` snippet, or `google-services.json` content.
 
 ## Local Installation Options (2026–2027 Guide)
 

@@ -1,24 +1,33 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import QRCode from 'qrcode';
 import {
   Check,
   Cloud,
   CloudUpload,
+  Copy,
   Database,
   Download,
   LogIn,
   LogOut,
   Moon,
   Palette,
+  QrCode,
   Settings,
+  Share2,
+  Smartphone,
   Sun,
   Trash2,
   Upload,
   X,
 } from 'lucide-react';
 import { useGiftStore } from '@/context/GiftStoreContext';
-import { parseFirebaseSnippet } from '@/lib/firebase';
+import {
+  buildAndroidPairingDeepLink,
+  buildWebPairingUrl,
+  parseFirebaseSnippet,
+} from '@/lib/firebase';
 import type { ColorMode, ThemeSeed } from '@/lib/types';
 
 interface SettingsSheetProps {
@@ -51,19 +60,98 @@ export function SettingsSheet({ open, onClose }: SettingsSheetProps) {
     resetData,
     exportJsonBackup,
     importJsonBackup,
+    showSnackbar,
   } = useGiftStore();
 
   const [snippetInput, setSnippetInput] = useState('');
   const [configError, setConfigError] = useState<string | null>(null);
   const [showConfigBox, setShowConfigBox] = useState(false);
+  const [showPairPanel, setShowPairPanel] = useState(false);
+  const [webClientIdDraft, setWebClientIdDraft] = useState('');
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+  const [copiedPairLink, setCopiedPairLink] = useState(false);
+
+  const effectivePairConfig = useMemo(() => {
+    if (!firebaseConfig) return null;
+    const trimmedClient = webClientIdDraft.trim() || firebaseConfig.webClientId?.trim();
+    return trimmedClient ? { ...firebaseConfig, webClientId: trimmedClient } : firebaseConfig;
+  }, [firebaseConfig, webClientIdDraft]);
+
+  const webPairingUrl = useMemo(() => {
+    if (!effectivePairConfig) return '';
+    return buildWebPairingUrl(effectivePairConfig);
+  }, [effectivePairConfig]);
+
+  const androidDeepLink = useMemo(() => {
+    if (!effectivePairConfig) return '';
+    return buildAndroidPairingDeepLink(effectivePairConfig);
+  }, [effectivePairConfig]);
+
+  useEffect(() => {
+    if (!open || !showPairPanel || !webPairingUrl) return;
+    let cancelled = false;
+    void QRCode.toDataURL(webPairingUrl, {
+      width: 220,
+      margin: 2,
+      color: { dark: '#141218', light: '#ffffff' },
+    })
+      .then((url) => {
+        if (!cancelled) setQrDataUrl(url);
+      })
+      .catch(() => {
+        if (!cancelled) setQrDataUrl(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, showPairPanel, webPairingUrl]);
 
   if (!open) return null;
+
+  const handleCopyPairLink = async () => {
+    if (!webPairingUrl || typeof navigator === 'undefined' || !navigator.clipboard) return;
+    if (
+      webClientIdDraft.trim() &&
+      firebaseConfig &&
+      webClientIdDraft.trim() !== (firebaseConfig.webClientId || '')
+    ) {
+      await connectFirebaseConfig({ ...firebaseConfig, webClientId: webClientIdDraft.trim() });
+    }
+    await navigator.clipboard.writeText(webPairingUrl);
+    setCopiedPairLink(true);
+    showSnackbar('Copied device pairing link to clipboard!');
+    setTimeout(() => setCopiedPairLink(false), 2200);
+  };
+
+  const handleSharePairLink = async () => {
+    if (!webPairingUrl) return;
+    if (
+      webClientIdDraft.trim() &&
+      firebaseConfig &&
+      webClientIdDraft.trim() !== (firebaseConfig.webClientId || '')
+    ) {
+      await connectFirebaseConfig({ ...firebaseConfig, webClientId: webClientIdDraft.trim() });
+    }
+    if (typeof navigator !== 'undefined' && navigator.share) {
+      try {
+        await navigator.share({
+          title: 'Gift Tracker — Cloud Sync Setup',
+          text: 'Open this link to connect Gift Tracker and sign in with your own Google account:',
+          url: webPairingUrl,
+        });
+        return;
+      } catch {
+        // Fallback to copy
+      }
+    }
+    await handleCopyPairLink();
+  };
 
   const handleSaveSnippet = async () => {
     const parsed = parseFirebaseSnippet(snippetInput);
     if (!parsed) {
       setConfigError(
-        'Could not find apiKey and projectId. Paste the firebaseConfig object or JSON from Firebase Console.'
+        'Could not find apiKey and projectId. Paste firebaseConfig, google-services.json, or a pairing link.'
       );
       return;
     }
@@ -274,9 +362,29 @@ export function SettingsSheet({ open, onClose }: SettingsSheetProps) {
                     >
                       Anonymous Sync
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setWebClientIdDraft(firebaseConfig.webClientId || '');
+                        setShowPairPanel((v) => !v);
+                      }}
+                      className="m3-btn-tonal"
+                    >
+                      <QrCode size={15} /> {showPairPanel ? 'Hide QR' : 'Pair Device / Share'}
+                    </button>
                   </div>
                 ) : (
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setWebClientIdDraft(firebaseConfig.webClientId || '');
+                        setShowPairPanel((v) => !v);
+                      }}
+                      className={showPairPanel ? 'm3-btn-filled' : 'm3-btn-tonal'}
+                    >
+                      <QrCode size={15} /> {showPairPanel ? 'Hide Pairing QR' : 'Pair Device / Invite'}
+                    </button>
                     <button
                       type="button"
                       onClick={() => void pushLocalToCloud()}
@@ -291,6 +399,101 @@ export function SettingsSheet({ open, onClose }: SettingsSheetProps) {
                     >
                       <LogOut size={15} /> Sign Out
                     </button>
+                  </div>
+                )}
+
+                {showPairPanel && (
+                  <div
+                    style={{
+                      background: 'var(--md-surface-container-low)',
+                      border: '1px solid var(--md-outline-variant)',
+                      borderRadius: '18px',
+                      padding: '14px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '12px',
+                    }}
+                  >
+                    <div>
+                      <div style={{ fontSize: '13.5px', fontWeight: 700 }}>
+                        Pair Another Device or Invite a Friend
+                      </div>
+                      <p
+                        style={{
+                          fontSize: '12px',
+                          color: 'var(--md-on-surface-variant)',
+                          marginTop: '3px',
+                          lineHeight: 1.45,
+                        }}
+                      >
+                        Scan this QR code or open the link on another phone, tablet, or laptop to
+                        configure Cloud Sync automatically. Anyone who signs in with their own Google
+                        account gets a completely separate, private workspace.
+                      </p>
+                    </div>
+
+                    {qrDataUrl && (
+                      <div style={{ display: 'flex', justifyContent: 'center' }}>
+                        <div
+                          style={{
+                            background: '#ffffff',
+                            padding: '10px',
+                            borderRadius: '16px',
+                            display: 'inline-flex',
+                            boxShadow: '0 4px 16px rgba(0, 0, 0, 0.14)',
+                          }}
+                        >
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={qrDataUrl}
+                            alt="Gift Tracker Firebase Pairing QR Code"
+                            width={184}
+                            height={184}
+                            style={{ display: 'block', borderRadius: '8px' }}
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {!firebaseConfig.webClientId && (
+                      <input
+                        type="text"
+                        value={webClientIdDraft}
+                        onChange={(e) => setWebClientIdDraft(e.target.value)}
+                        placeholder="Optional: Google OAuth Web Client ID (for Android Google Sign-In)"
+                        className="m3-input"
+                        style={{ fontSize: '12px', height: '36px' }}
+                      />
+                    )}
+
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                      <button
+                        type="button"
+                        onClick={() => void handleCopyPairLink()}
+                        className="m3-btn-filled"
+                      >
+                        {copiedPairLink ? <Check size={14} /> : <Copy size={14} />}
+                        {copiedPairLink ? 'Copied!' : 'Copy Pairing Link'}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => void handleSharePairLink()}
+                        className="m3-btn-tonal"
+                      >
+                        <Share2 size={14} /> Share Link
+                      </button>
+
+                      {androidDeepLink && (
+                        <a
+                          href={androidDeepLink}
+                          className="m3-btn-tonal"
+                          style={{ textDecoration: 'none' }}
+                        >
+                          <Smartphone size={14} /> Open Android App
+                        </a>
+                      )}
+                    </div>
                   </div>
                 )}
 
@@ -309,8 +512,8 @@ export function SettingsSheet({ open, onClose }: SettingsSheetProps) {
               </div>
             ) : (
               <p style={{ fontSize: '12.5px', color: 'var(--md-on-surface-variant)' }}>
-                Data is saved locally on this device. To sync across Android and Web, paste your Firebase
-                Web App config below (or set <code>.env.local</code>).
+                Data is saved locally on this device. To sync across Android and Web, paste a pairing
+                link, <code>firebaseConfig</code>, or <code>google-services.json</code> below.
               </p>
             )}
 
@@ -320,7 +523,7 @@ export function SettingsSheet({ open, onClose }: SettingsSheetProps) {
                   rows={4}
                   value={snippetInput}
                   onChange={(e) => setSnippetInput(e.target.value)}
-                  placeholder={`const firebaseConfig = {\n  apiKey: "AIza...",\n  authDomain: "your-app.firebaseapp.com",\n  projectId: "your-app"\n};`}
+                  placeholder={`Paste a pairing link (?pair=...), firebaseConfig snippet, or google-services.json`}
                   className="m3-textarea"
                   style={{ fontFamily: 'var(--font-mono), monospace', fontSize: '12px' }}
                 />

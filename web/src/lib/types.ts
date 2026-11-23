@@ -85,6 +85,7 @@ export interface FirebaseClientConfig {
   storageBucket?: string;
   messagingSenderId?: string;
   appId?: string;
+  webClientId?: string;
 }
 
 export type NavTab = 'events' | 'ideas' | 'people' | 'wishlist';

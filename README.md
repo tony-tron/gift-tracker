@@ -45,6 +45,14 @@ npm run dev
 ## Connecting Firebase Cloud Sync
 
 1. Create a free Firebase project at [console.firebase.google.com](https://console.firebase.google.com/).
-2. Enable **Authentication → Google** (and/or Anonymous) and **Firestore Database** (deploy root `firestore.rules` to lock access to your UID).
-3. In **Settings** (gear icon) on either Android or Web, paste your `firebaseConfig` snippet (or place `google-services.json` in `android/app/` and `.env.local` in `web/`).
+2. Enable **Authentication → Google** (and/or Anonymous) and **Firestore Database**, then deploy `firestore.rules` to scope workspaces per Google UID:
+   ```bash
+   firebase use --add                  # Select your Firebase project (great for forks!)
+   firebase deploy --only firestore:rules
+   ```
+3. **Connect once, pair everywhere**:
+   - **Pre-Wired Web Host**: Set `NEXT_PUBLIC_FIREBASE_*` in `.env.local` or Firebase App Hosting / Vercel so every browser is zero-config.
+   - **Pre-Wired Personal Android APKs**: Add `GOOGLE_SERVICES_JSON` (or `GOOGLE_SERVICES_JSON_BASE64`) as a GitHub Repository Secret so CI-built APKs sign in with Google out of the box on any new phone — while forks without the secret still build cleanly.
+   - **1-Scan QR / Pairing Link**: In **Settings → Cloud Sync → Pair Device / Invite**, scan the QR code or share the `?pair=...` / `gifttracker://pair` link to configure new devices or invite friends (each Google account gets its own isolated workspace).
+   - **Manual Paste**: Or paste a pairing link, `firebaseConfig`, or `google-services.json` directly into **Settings**.
 4. If deploying the Web App via **Firebase App Hosting**, set the backend **App root directory** to `web`.

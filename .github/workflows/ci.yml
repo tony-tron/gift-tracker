@@ -47,6 +47,17 @@ jobs:
           else
             echo "No ANDROID_KEYSTORE_BASE64 secret found; falling back to default debug key."
           fi
+      - name: Configure google-services.json (if secret is set)
+        run: |
+          if [ -n "${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}" ]; then
+            echo "${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}" | base64 --decode > app/google-services.json
+            echo "google-services.json decoded from base64 secret ($(wc -c < app/google-services.json) bytes)."
+          elif [ -n "${{ secrets.GOOGLE_SERVICES_JSON }}" ]; then
+            printf '%s' "${{ secrets.GOOGLE_SERVICES_JSON }}" > app/google-services.json
+            echo "google-services.json written from secret ($(wc -c < app/google-services.json) bytes)."
+          else
+            echo "No GOOGLE_SERVICES_JSON secret found; building clean APK with runtime/QR pairing support."
+          fi
       - name: Build Release & Debug APKs
         env:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}

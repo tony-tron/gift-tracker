@@ -33,6 +33,7 @@ data class CloudAuthState(
     val connectedProjectId: String? = null,
     val isFromGoogleServicesResource: Boolean = false,
     val webClientId: String? = null,
+    val exportableConfig: FirebaseRuntimeConfig? = null,
     val userUid: String? = null,
     val userLabel: String? = null,
     val syncError: String? = null
@@ -100,7 +101,8 @@ class GiftRepository(private val appContext: Context) {
             syncStatus = SyncStatus.SIGNED_OUT,
             connectedProjectId = info.projectId,
             isFromGoogleServicesResource = info.isFromGoogleServicesResource,
-            webClientId = info.webClientId
+            webClientId = info.webClientId,
+            exportableConfig = info.exportableConfig
         )
 
         firebaseManager.observeAuthState(app) { user ->
@@ -173,6 +175,7 @@ class GiftRepository(private val appContext: Context) {
     suspend fun setThemeSeed(seed: ThemeSeed) = localStorage.setThemeSeed(seed)
     suspend fun setColorMode(mode: ColorMode) = localStorage.setColorMode(mode)
     suspend fun setSelectedEventId(id: String) = localStorage.setSelectedEventId(id)
+    suspend fun setWebAppUrl(url: String?) = localStorage.setWebAppUrl(url)
 
     suspend fun saveRuntimeFirebaseConfig(config: FirebaseRuntimeConfig?) {
         localStorage.setRuntimeFirebaseConfig(config)
