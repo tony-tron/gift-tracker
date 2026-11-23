@@ -71,11 +71,52 @@ export interface WishItem {
   order?: number;
 }
 
+export interface SharedWishlistLink {
+  id: string;
+  title: string;
+  ownerName?: string;
+  wishIds: string[];
+  includeAllActive: boolean;
+  includeNotes: boolean;
+  includeUrls: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PublishedWishItem {
+  id: string;
+  title: string;
+  url: string;
+  notes: string;
+  priority: 'high' | 'medium' | 'low';
+  order: number;
+}
+
+export interface PublicSharedWishlistDoc {
+  id: string;
+  ownerUid: string;
+  title: string;
+  ownerName: string;
+  items: PublishedWishItem[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SharedWishClaim {
+  wishId: string;
+  claimedBy: string;
+  claimerToken: string;
+  purchased: boolean;
+  giverNote?: string;
+  claimedAt: string;
+}
+
 export interface GiftDataset {
   people: Person[];
   events: GiftEvent[];
   gifts: GiftItem[];
   wishes: WishItem[];
+  sharedLinks?: SharedWishlistLink[];
 }
 
 export interface FirebaseClientConfig {

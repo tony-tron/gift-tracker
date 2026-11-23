@@ -20,7 +20,8 @@ import { ShareWishlistSheet } from '@/components/modals/ShareWishlistSheet';
 import type { WishItem } from '@/lib/types';
 
 export function WishlistView() {
-  const { wishes, addWish, updateWish, deleteWish, reorderWishes, showSnackbar } = useGiftStore();
+  const { wishes, sharedLinks, addWish, updateWish, deleteWish, reorderWishes, showSnackbar } =
+    useGiftStore();
 
   const [filter, setFilter] = useState<'wanted' | 'received'>('wanted');
   const [newTitle, setNewTitle] = useState('');
@@ -209,11 +210,14 @@ export function WishlistView() {
         <button
           type="button"
           onClick={() => setIsShareSheetOpen(true)}
-          disabled={wantedWishes.length === 0}
+          disabled={wantedWishes.length === 0 && sharedLinks.length === 0}
           className="m3-btn-filled"
-          style={{ opacity: wantedWishes.length === 0 ? 0.6 : 1 }}
+          style={{ opacity: wantedWishes.length === 0 && sharedLinks.length === 0 ? 0.6 : 1 }}
         >
-          <Share2 size={15} /> Share Wishlist
+          <Share2 size={15} />{' '}
+          {sharedLinks.length > 0
+            ? `Share & Links (${sharedLinks.length})`
+            : 'Share Wishlist'}
         </button>
       </div>
 

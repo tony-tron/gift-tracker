@@ -13,11 +13,13 @@ import com.tonytron.gifttracker.data.model.GiftEvent
 import com.tonytron.gifttracker.data.model.GiftItem
 import com.tonytron.gifttracker.data.model.IdGenerator
 import com.tonytron.gifttracker.data.model.Person
+import com.tonytron.gifttracker.data.model.SharedWishlistLink
 import com.tonytron.gifttracker.data.model.SyncStatus
 import com.tonytron.gifttracker.data.model.ThemeSeed
 import com.tonytron.gifttracker.data.model.WishItem
 import com.tonytron.gifttracker.data.remote.FirebaseSyncManager
 import com.tonytron.gifttracker.widget.GiftTrackerWidget
+import java.time.Instant
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -162,6 +164,10 @@ class GiftRepository(private val appContext: Context) {
                         persistAndRefreshWidget(_dataset.value.copy(wishes = items))
                         _cloudState.update { it.copy(syncStatus = SyncStatus.SYNCED, syncError = null) }
                     },
+                    onSharedLinks = { items ->
+                        persistAndRefreshWidget(_dataset.value.copy(sharedLinks = items))
+                        _cloudState.update { it.copy(syncStatus = SyncStatus.SYNCED, syncError = null) }
+                    },
                     onError = { err ->
                         _cloudState.update { it.copy(syncStatus = SyncStatus.ERROR, syncError = err.localizedMessage) }
                     }
@@ -176,6 +182,7 @@ class GiftRepository(private val appContext: Context) {
     suspend fun setColorMode(mode: ColorMode) = localStorage.setColorMode(mode)
     suspend fun setSelectedEventId(id: String) = localStorage.setSelectedEventId(id)
     suspend fun setWebAppUrl(url: String?) = localStorage.setWebAppUrl(url)
+    suspend fun setOwnerDisplayName(name: String?) = localStorage.setOwnerDisplayName(name)
 
     suspend fun saveRuntimeFirebaseConfig(config: FirebaseRuntimeConfig?) {
         localStorage.setRuntimeFirebaseConfig(config)
@@ -400,7 +407,7 @@ class GiftRepository(private val appContext: Context) {
         return ev
     }
 
-    // --- Wishes CRUD ---
+    // --- Wishes & Live Shared Wishlist Links CRUD ---
 
     fun addWish(title: String, url: String, priority: String = "medium", notes: String = ""): WishItem {
         val currentWishes = _dataset.value.wishes
@@ -413,9 +420,14 @@ class GiftRepository(private val appContext: Context) {
             priority = priority,
             order = if (currentWishes.isNotEmpty()) minOrder - 1 else 0
         )
-        val updated = _dataset.value.copy(wishes = listOf(wish) + _dataset.value.wishes)
+        val nextWishes = listOf(wish) + _dataset.value.wishes
+        val updated = _dataset.value.copy(wishes = nextWishes)
         persistAndRefreshWidget(updated)
         syncUpsert("wishes", wish.id, wish.toFirestoreMap())
+        val links = updated.sharedLinks
+        if (links.any { it.includeAllActive }) {
+            syncSharedWishlistsAsync(links, nextWishes)
+        }
         return wish
     }
 
@@ -438,20 +450,114 @@ class GiftRepository(private val appContext: Context) {
         }
         val updated = _dataset.value.copy(wishes = next)
         persistAndRefreshWidget(updated)
+        if (updated.sharedLinks.isNotEmpty()) {
+            syncSharedWishlistsAsync(updated.sharedLinks, next)
+        }
     }
 
     fun updateWish(wish: WishItem) {
-        val updated = _dataset.value.copy(
-            wishes = _dataset.value.wishes.map { if (it.id == wish.id) wish else it }
-        )
+        val prevWish = _dataset.value.wishes.firstOrNull { it.id == wish.id }
+        val wasUnreceived = prevWish?.received == true && !wish.received
+        val nextWishes = _dataset.value.wishes.map { if (it.id == wish.id) wish else it }
+        val updated = _dataset.value.copy(wishes = nextWishes)
         persistAndRefreshWidget(updated)
         syncUpsert("wishes", wish.id, wish.toFirestoreMap())
+        val links = updated.sharedLinks
+        if (links.isNotEmpty()) {
+            if (wasUnreceived) {
+                val app = currentFirebaseApp
+                if (app != null) {
+                    scope.launch {
+                        firebaseManager.clearPublicWishClaimsForOwner(app, links, wish.id)
+                    }
+                }
+            }
+            syncSharedWishlistsAsync(links, nextWishes)
+        }
     }
 
     fun deleteWish(id: String) {
-        val updated = _dataset.value.copy(wishes = _dataset.value.wishes.filterNot { it.id == id })
+        val nextWishes = _dataset.value.wishes.filterNot { it.id == id }
+        val now = Instant.now().toString()
+        val nextLinks = _dataset.value.sharedLinks.map { link ->
+            if (id in link.wishIds) link.copy(wishIds = link.wishIds - id, updatedAt = now) else link
+        }
+        val updated = _dataset.value.copy(wishes = nextWishes, sharedLinks = nextLinks)
         persistAndRefreshWidget(updated)
         syncDelete("wishes", id)
+        nextLinks.forEach { l -> syncUpsert("shared_links", l.id, l.toFirestoreMap()) }
+        if (nextLinks.isNotEmpty()) {
+            val app = currentFirebaseApp
+            if (app != null) {
+                scope.launch {
+                    firebaseManager.clearPublicWishClaimsForOwner(app, nextLinks, id)
+                }
+            }
+            syncSharedWishlistsAsync(nextLinks, nextWishes)
+        }
+    }
+
+    suspend fun createSharedWishlistLink(
+        title: String,
+        ownerName: String,
+        wishIds: List<String>,
+        includeAllActive: Boolean,
+        includeNotes: Boolean,
+        includeUrls: Boolean
+    ): Result<SharedWishlistLink> {
+        val app = currentFirebaseApp ?: return Result.failure(IllegalStateException("Connect Firebase in Settings first"))
+        val user = currentFirebaseUser ?: return Result.failure(IllegalStateException("Sign in to Cloud Sync in Settings first"))
+        val now = Instant.now().toString()
+        val link = SharedWishlistLink(
+            id = IdGenerator.generateShareId(),
+            title = title.trim().ifBlank { "Gift Wishlist" },
+            ownerName = ownerName.trim(),
+            wishIds = wishIds,
+            includeAllActive = includeAllActive,
+            includeNotes = includeNotes,
+            includeUrls = includeUrls,
+            createdAt = now,
+            updatedAt = now
+        )
+        return runCatching {
+            firebaseManager.publishSharedWishlistDoc(app, user.uid, link, _dataset.value.wishes)
+            firebaseManager.upsertDoc(app, user.uid, "shared_links", link.id, link.toFirestoreMap())
+            val nextLinks = listOf(link) + _dataset.value.sharedLinks.filterNot { it.id == link.id }
+            persistAndRefreshWidget(_dataset.value.copy(sharedLinks = nextLinks))
+            link
+        }
+    }
+
+    suspend fun updateSharedWishlistLink(updatedLink: SharedWishlistLink): Result<Unit> {
+        val app = currentFirebaseApp ?: return Result.failure(IllegalStateException("Not connected"))
+        val user = currentFirebaseUser ?: return Result.failure(IllegalStateException("Not signed in"))
+        val stamped = updatedLink.copy(updatedAt = Instant.now().toString())
+        return runCatching {
+            firebaseManager.publishSharedWishlistDoc(app, user.uid, stamped, _dataset.value.wishes)
+            firebaseManager.upsertDoc(app, user.uid, "shared_links", stamped.id, stamped.toFirestoreMap())
+            val nextLinks = _dataset.value.sharedLinks.map { if (it.id == stamped.id) stamped else it }
+            persistAndRefreshWidget(_dataset.value.copy(sharedLinks = nextLinks))
+        }
+    }
+
+    suspend fun deleteSharedWishlistLink(shareId: String): Result<Unit> {
+        val knownWishIds = _dataset.value.wishes.map { it.id }
+        val nextLinks = _dataset.value.sharedLinks.filterNot { it.id == shareId }
+        persistAndRefreshWidget(_dataset.value.copy(sharedLinks = nextLinks))
+        val app = currentFirebaseApp ?: return Result.success(Unit)
+        val user = currentFirebaseUser ?: return Result.success(Unit)
+        return runCatching {
+            firebaseManager.deleteDoc(app, user.uid, "shared_links", shareId)
+            firebaseManager.deletePublicSharedWishlistDoc(app, shareId, knownWishIds)
+        }
+    }
+
+    private fun syncSharedWishlistsAsync(links: List<SharedWishlistLink>, wishes: List<WishItem>) {
+        val app = currentFirebaseApp ?: return
+        val user = currentFirebaseUser ?: return
+        scope.launch {
+            firebaseManager.syncAllSharedWishlistsForOwner(app, user.uid, links, wishes)
+        }
     }
 
     // --- Backup & Reset ---
@@ -465,15 +571,24 @@ class GiftRepository(private val appContext: Context) {
         val user = currentFirebaseUser
         if (app != null && user != null) {
             runCatching { firebaseManager.uploadFullDataset(app, user.uid, parsed) }
+            if (parsed.sharedLinks.isNotEmpty()) {
+                runCatching { firebaseManager.syncAllSharedWishlistsForOwner(app, user.uid, parsed.sharedLinks, parsed.wishes) }
+            }
         }
         return true
     }
 
     suspend fun resetAllData() {
+        val prevLinks = _dataset.value.sharedLinks
+        val prevWishIds = _dataset.value.wishes.map { it.id }
         persistAndRefreshWidget(GiftDataset.EMPTY)
         val app = currentFirebaseApp
         val user = currentFirebaseUser
         if (app != null && user != null) {
+            prevLinks.forEach { l ->
+                runCatching { firebaseManager.deleteDoc(app, user.uid, "shared_links", l.id) }
+                runCatching { firebaseManager.deletePublicSharedWishlistDoc(app, l.id, prevWishIds) }
+            }
             runCatching { firebaseManager.uploadFullDataset(app, user.uid, GiftDataset.EMPTY) }
         }
     }

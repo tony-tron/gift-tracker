@@ -13,17 +13,22 @@ import type { User } from 'firebase/auth';
 import { EMPTY_DATASET } from '@/lib/seedData';
 import {
   checkRemoteHasData,
+  clearPublicWishClaimsForOwner,
   decodeFirebasePairingToken,
+  deletePublicSharedWishlistDoc,
   deleteRemoteDoc,
   encodeFirebasePairingToken,
+  generateShareId,
   getSavedFirebaseConfig,
   initFirebaseServices,
   observeAuth,
+  publishSharedWishlistDoc,
   saveRuntimeFirebaseConfig,
   signInQuickSync,
   signInWithGoogle,
   signOutFirebase,
   subscribeToWorkspace,
+  syncAllSharedWishlistsForOwner,
   uploadFullDatasetToFirestore,
   upsertRemoteDoc,
 } from '@/lib/firebase';
@@ -37,6 +42,7 @@ import type {
   GiftItem,
   NavTab,
   Person,
+  SharedWishlistLink,
   ThemeSeed,
   WishItem,
 } from '@/lib/types';
@@ -63,6 +69,7 @@ interface GiftStoreContextValue {
   events: GiftEvent[];
   gifts: GiftItem[];
   wishes: WishItem[];
+  sharedLinks: SharedWishlistLink[];
 
   // Navigation & Active selections
   activeTab: NavTab;
@@ -115,11 +122,24 @@ interface GiftStoreContextValue {
   updateEvent: (id: string, patch: Partial<GiftEvent>) => void;
   deleteEvent: (id: string) => void;
 
-  // Personal Wishlist CRUD
+  // Personal Wishlist & Live Group Links CRUD
   addWish: (input: Omit<WishItem, 'id'>) => WishItem;
   updateWish: (id: string, patch: Partial<WishItem>) => void;
   deleteWish: (id: string) => void;
   reorderWishes: (orderedIds: string[]) => void;
+  createSharedWishlistLink: (input: {
+    title: string;
+    ownerName?: string;
+    wishIds: string[];
+    includeAllActive: boolean;
+    includeNotes: boolean;
+    includeUrls: boolean;
+  }) => Promise<SharedWishlistLink | null>;
+  updateSharedWishlistLink: (
+    id: string,
+    patch: Partial<Omit<SharedWishlistLink, 'id' | 'createdAt'>>
+  ) => Promise<void>;
+  deleteSharedWishlistLink: (id: string) => Promise<void>;
 
   // Reset & Backup
   resetData: () => void;
@@ -153,6 +173,7 @@ function readInitialDataset(): GiftDataset {
           events: parsed.events,
           gifts: parsed.gifts,
           wishes: [...parsed.wishes].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
+          sharedLinks: parsed.sharedLinks ?? [],
         };
       }
     }
@@ -363,6 +384,9 @@ export function GiftStoreProvider({ children }: { children: React.ReactNode }) {
           },
           onWishes: (wishes) => {
             setDataset((prev) => ({ ...prev, wishes }));
+          },
+          onSharedLinks: (sharedLinks) => {
+            setDataset((prev) => ({ ...prev, sharedLinks }));
           },
           onError: (err) => {
             setSyncError(err.message);
@@ -769,7 +793,7 @@ export function GiftStoreProvider({ children }: { children: React.ReactNode }) {
     [firebaseUser, selectedEventId]
   );
 
-  // Wishes CRUD
+  // Wishes CRUD & Automatic Live Shared Wishlist Sync
   const addWish = useCallback(
     (input: Omit<WishItem, 'id'>): WishItem => {
       const minOrder = datasetRef.current.wishes.reduce(
@@ -781,9 +805,14 @@ export function GiftStoreProvider({ children }: { children: React.ReactNode }) {
         id: makeId('wish'),
         order: datasetRef.current.wishes.length > 0 ? minOrder - 1 : 0,
       };
+      const nextWishes = [wish, ...datasetRef.current.wishes];
       setDataset((prev) => ({ ...prev, wishes: [wish, ...prev.wishes] }));
       if (firebaseUser) {
         void upsertRemoteDoc('wishes', wish.id, wish, firebaseUser.uid);
+        const links = datasetRef.current.sharedLinks ?? [];
+        if (links.some((l) => l.includeAllActive)) {
+          void syncAllSharedWishlistsForOwner(links, firebaseUser.uid, nextWishes);
+        }
       }
       showSnackbar(`Added "${wish.title}" to My Wishlist`);
       return wish;
@@ -793,29 +822,56 @@ export function GiftStoreProvider({ children }: { children: React.ReactNode }) {
 
   const updateWish = useCallback(
     (id: string, patch: Partial<WishItem>) => {
-      setDataset((prev) => {
-        const nextWishes = prev.wishes.map((w) => {
-          if (w.id !== id) return w;
-          const updated = { ...w, ...patch };
-          if (firebaseUser) {
-            void upsertRemoteDoc('wishes', id, updated, firebaseUser.uid);
+      const existingWish = datasetRef.current.wishes.find((w) => w.id === id);
+      const wasUnreceived = Boolean(existingWish?.received && patch.received === false);
+
+      const nextWishes = datasetRef.current.wishes.map((w) =>
+        w.id === id ? { ...w, ...patch } : w
+      );
+      setDataset((prev) => ({
+        ...prev,
+        wishes: prev.wishes.map((w) => (w.id === id ? { ...w, ...patch } : w)),
+      }));
+
+      if (firebaseUser) {
+        const updatedItem = nextWishes.find((w) => w.id === id);
+        if (updatedItem) {
+          void upsertRemoteDoc('wishes', id, updatedItem, firebaseUser.uid);
+        }
+        const links = datasetRef.current.sharedLinks ?? [];
+        if (links.length > 0) {
+          if (wasUnreceived) {
+            void clearPublicWishClaimsForOwner(links, id);
           }
-          return updated;
-        });
-        return { ...prev, wishes: nextWishes };
-      });
+          void syncAllSharedWishlistsForOwner(links, firebaseUser.uid, nextWishes);
+        }
+      }
     },
     [firebaseUser]
   );
 
   const deleteWish = useCallback(
     (id: string) => {
+      const nextWishes = datasetRef.current.wishes.filter((w) => w.id !== id);
+      const nextLinks = (datasetRef.current.sharedLinks ?? []).map((l) =>
+        l.wishIds.includes(id)
+          ? { ...l, wishIds: l.wishIds.filter((wid) => wid !== id), updatedAt: new Date().toISOString() }
+          : l
+      );
       setDataset((prev) => ({
         ...prev,
         wishes: prev.wishes.filter((w) => w.id !== id),
+        sharedLinks: nextLinks,
       }));
       if (firebaseUser) {
         void deleteRemoteDoc('wishes', id, firebaseUser.uid);
+        nextLinks.forEach((l) => {
+          void upsertRemoteDoc('shared_links', l.id, l, firebaseUser.uid);
+        });
+        if (nextLinks.length > 0) {
+          void clearPublicWishClaimsForOwner(nextLinks, id);
+          void syncAllSharedWishlistsForOwner(nextLinks, firebaseUser.uid, nextWishes);
+        }
       }
       showSnackbar('Removed item from Wishlist');
     },
@@ -824,37 +880,121 @@ export function GiftStoreProvider({ children }: { children: React.ReactNode }) {
 
   const reorderWishes = useCallback(
     (orderedIds: string[]) => {
-      setDataset((prev) => {
-        const idMap = new Map(prev.wishes.map((w) => [w.id, w]));
-        const nextWishes: WishItem[] = [];
-        orderedIds.forEach((id, index) => {
-          const w = idMap.get(id);
-          if (w) {
-            const updated = { ...w, order: index };
-            nextWishes.push(updated);
-            if (firebaseUser) {
-              void upsertRemoteDoc('wishes', id, updated, firebaseUser.uid);
-            }
-          }
-        });
-        prev.wishes.forEach((w) => {
-          if (!orderedIds.includes(w.id)) {
-            const updated = { ...w, order: nextWishes.length };
-            nextWishes.push(updated);
-            if (firebaseUser) {
-              void upsertRemoteDoc('wishes', w.id, updated, firebaseUser.uid);
-            }
-          }
-        });
-        return { ...prev, wishes: nextWishes };
+      const idMap = new Map(datasetRef.current.wishes.map((w) => [w.id, w]));
+      const computedNext: WishItem[] = [];
+      orderedIds.forEach((id, index) => {
+        const w = idMap.get(id);
+        if (w) computedNext.push({ ...w, order: index });
       });
+      datasetRef.current.wishes.forEach((w) => {
+        if (!orderedIds.includes(w.id)) {
+          computedNext.push({ ...w, order: computedNext.length });
+        }
+      });
+
+      setDataset((prev) => ({ ...prev, wishes: computedNext }));
+      if (firebaseUser) {
+        computedNext.forEach((w) => {
+          void upsertRemoteDoc('wishes', w.id, w, firebaseUser.uid);
+        });
+        const links = datasetRef.current.sharedLinks ?? [];
+        if (links.length > 0) {
+          void syncAllSharedWishlistsForOwner(links, firebaseUser.uid, computedNext);
+        }
+      }
       showSnackbar('Updated wishlist order');
+    },
+    [firebaseUser, showSnackbar]
+  );
+
+  // Live Collaborative Shared Wishlist Links CRUD
+  const createSharedWishlistLink = useCallback(
+    async (input: {
+      title: string;
+      ownerName?: string;
+      wishIds: string[];
+      includeAllActive: boolean;
+      includeNotes: boolean;
+      includeUrls: boolean;
+    }): Promise<SharedWishlistLink | null> => {
+      if (!firebaseUser) {
+        showSnackbar('Sign in to Cloud Sync in Settings first to create a live checklist link.');
+        return null;
+      }
+      const now = new Date().toISOString();
+      const link: SharedWishlistLink = {
+        id: generateShareId(),
+        title: input.title.trim() || 'Gift Wishlist',
+        ownerName: (input.ownerName || '').trim(),
+        wishIds: input.wishIds,
+        includeAllActive: input.includeAllActive,
+        includeNotes: input.includeNotes,
+        includeUrls: input.includeUrls,
+        createdAt: now,
+        updatedAt: now,
+      };
+      try {
+        await publishSharedWishlistDoc(link, firebaseUser.uid, datasetRef.current.wishes);
+        await upsertRemoteDoc('shared_links', link.id, link, firebaseUser.uid);
+        setDataset((prev) => ({
+          ...prev,
+          sharedLinks: [link, ...(prev.sharedLinks ?? []).filter((s) => s.id !== link.id)],
+        }));
+        showSnackbar(`Created live checklist link "${link.title}"!`);
+        return link;
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : 'Failed to publish shared wishlist';
+        showSnackbar(msg);
+        return null;
+      }
+    },
+    [firebaseUser, showSnackbar]
+  );
+
+  const updateSharedWishlistLink = useCallback(
+    async (
+      id: string,
+      patch: Partial<Omit<SharedWishlistLink, 'id' | 'createdAt'>>
+    ): Promise<void> => {
+      const existing = (datasetRef.current.sharedLinks ?? []).find((l) => l.id === id);
+      if (!existing || !firebaseUser) return;
+      const updated: SharedWishlistLink = {
+        ...existing,
+        ...patch,
+        updatedAt: new Date().toISOString(),
+      };
+      setDataset((prev) => ({
+        ...prev,
+        sharedLinks: (prev.sharedLinks ?? []).map((l) => (l.id === id ? updated : l)),
+      }));
+      await publishSharedWishlistDoc(updated, firebaseUser.uid, datasetRef.current.wishes);
+      await upsertRemoteDoc('shared_links', id, updated, firebaseUser.uid);
+      showSnackbar(`Updated "${updated.title}"`);
+    },
+    [firebaseUser, showSnackbar]
+  );
+
+  const deleteSharedWishlistLink = useCallback(
+    async (id: string): Promise<void> => {
+      const existing = (datasetRef.current.sharedLinks ?? []).find((l) => l.id === id);
+      const knownWishIds = datasetRef.current.wishes.map((w) => w.id);
+      setDataset((prev) => ({
+        ...prev,
+        sharedLinks: (prev.sharedLinks ?? []).filter((l) => l.id !== id),
+      }));
+      if (firebaseUser) {
+        await deleteRemoteDoc('shared_links', id, firebaseUser.uid);
+        await deletePublicSharedWishlistDoc(id, knownWishIds);
+      }
+      showSnackbar(existing ? `Revoked link "${existing.title}"` : 'Revoked shared link');
     },
     [firebaseUser, showSnackbar]
   );
 
   // Reset to clean slate
   const resetData = useCallback(() => {
+    const prevLinks = datasetRef.current.sharedLinks ?? [];
+    const knownWishIds = datasetRef.current.wishes.map((w) => w.id);
     setDataset(EMPTY_DATASET);
     if (typeof window !== 'undefined') {
       window.localStorage.setItem(LOCAL_DATA_KEY, JSON.stringify(EMPTY_DATASET));
@@ -862,6 +1002,10 @@ export function GiftStoreProvider({ children }: { children: React.ReactNode }) {
     if (firebaseUser) {
       const services = initFirebaseServices();
       if (services) {
+        prevLinks.forEach((l) => {
+          void deleteRemoteDoc('shared_links', l.id, firebaseUser.uid);
+          void deletePublicSharedWishlistDoc(l.id, knownWishIds);
+        });
         void uploadFullDatasetToFirestore(services.db, firebaseUser.uid, EMPTY_DATASET);
       }
     }
@@ -884,12 +1028,20 @@ export function GiftStoreProvider({ children }: { children: React.ReactNode }) {
           events: parsed.events,
           gifts: parsed.gifts,
           wishes: parsed.wishes,
+          sharedLinks: parsed.sharedLinks ?? [],
         };
         setDataset(clean);
         if (firebaseUser) {
           const services = initFirebaseServices();
           if (services) {
             void uploadFullDatasetToFirestore(services.db, firebaseUser.uid, clean);
+            if ((clean.sharedLinks ?? []).length > 0) {
+              void syncAllSharedWishlistsForOwner(
+                clean.sharedLinks ?? [],
+                firebaseUser.uid,
+                clean.wishes
+              );
+            }
           }
         }
         showSnackbar('Imported backup successfully!');
@@ -907,6 +1059,7 @@ export function GiftStoreProvider({ children }: { children: React.ReactNode }) {
       events: dataset.events,
       gifts: dataset.gifts,
       wishes: dataset.wishes,
+      sharedLinks: dataset.sharedLinks ?? [],
       activeTab,
       setActiveTab,
       selectedEventId,
@@ -945,6 +1098,9 @@ export function GiftStoreProvider({ children }: { children: React.ReactNode }) {
       updateWish,
       deleteWish,
       reorderWishes,
+      createSharedWishlistLink,
+      updateSharedWishlistLink,
+      deleteSharedWishlistLink,
       resetData,
       exportJsonBackup,
       importJsonBackup,
@@ -987,6 +1143,9 @@ export function GiftStoreProvider({ children }: { children: React.ReactNode }) {
       updateWish,
       deleteWish,
       reorderWishes,
+      createSharedWishlistLink,
+      updateSharedWishlistLink,
+      deleteSharedWishlistLink,
       resetData,
       exportJsonBackup,
       importJsonBackup,

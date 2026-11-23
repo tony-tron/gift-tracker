@@ -22,6 +22,7 @@ import {
   onSnapshot,
   writeBatch,
   getDocs,
+  runTransaction,
   type Firestore,
   type Unsubscribe,
 } from 'firebase/firestore';
@@ -31,6 +32,10 @@ import type {
   GiftEvent,
   GiftItem,
   Person,
+  PublishedWishItem,
+  PublicSharedWishlistDoc,
+  SharedWishClaim,
+  SharedWishlistLink,
   WishItem,
 } from './types';
 
@@ -427,6 +432,7 @@ export async function uploadFullDatasetToFirestore(
     ...dataset.events.map((e) => ({ col: 'events', id: e.id, data: e })),
     ...dataset.gifts.map((g) => ({ col: 'gifts', id: g.id, data: g })),
     ...dataset.wishes.map((w) => ({ col: 'wishes', id: w.id, data: w })),
+    ...(dataset.sharedLinks ?? []).map((s) => ({ col: 'shared_links', id: s.id, data: s })),
   ];
 
   const chunkSize = 400;
@@ -442,9 +448,9 @@ export async function uploadFullDatasetToFirestore(
 }
 
 export async function upsertRemoteDoc(
-  colName: 'people' | 'events' | 'gifts' | 'wishes',
+  colName: 'people' | 'events' | 'gifts' | 'wishes' | 'shared_links',
   id: string,
-  data: Person | GiftEvent | GiftItem | WishItem,
+  data: Person | GiftEvent | GiftItem | WishItem | SharedWishlistLink,
   namespaceId: string
 ): Promise<void> {
   const services = initFirebaseServices();
@@ -454,7 +460,7 @@ export async function upsertRemoteDoc(
 }
 
 export async function deleteRemoteDoc(
-  colName: 'people' | 'events' | 'gifts' | 'wishes',
+  colName: 'people' | 'events' | 'gifts' | 'wishes' | 'shared_links',
   id: string,
   namespaceId: string
 ): Promise<void> {
@@ -472,6 +478,7 @@ export function subscribeToWorkspace(
     onEvents: (items: GiftEvent[]) => void;
     onGifts: (items: GiftItem[]) => void;
     onWishes: (items: WishItem[]) => void;
+    onSharedLinks?: (items: SharedWishlistLink[]) => void;
     onError?: (err: Error) => void;
   }
 ): Unsubscribe {
@@ -529,7 +536,278 @@ export function subscribeToWorkspace(
     )
   );
 
+  if (handlers.onSharedLinks) {
+    const onLinks = handlers.onSharedLinks;
+    unsubs.push(
+      onSnapshot(
+        collection(db, 'workspaces', namespaceId, 'shared_links'),
+        (snap) => {
+          const items = snap.docs
+            .map((d) => d.data() as SharedWishlistLink)
+            .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+          onLinks(items);
+        },
+        (err) => handlers.onError?.(err)
+      )
+    );
+  }
+
   return () => {
     unsubs.forEach((u) => u());
   };
+}
+
+// --- Collaborative Live Shared Wishlists (/w/[shareId]) ---
+
+const SHARE_ID_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+
+export function generateShareId(length = 14): string {
+  const bytes = new Uint8Array(length);
+  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+    crypto.getRandomValues(bytes);
+  } else {
+    for (let i = 0; i < length; i += 1) {
+      bytes[i] = Math.floor(Math.random() * 256);
+    }
+  }
+  let id = '';
+  for (let i = 0; i < length; i += 1) {
+    id += SHARE_ID_ALPHABET[bytes[i] % SHARE_ID_ALPHABET.length];
+  }
+  return id;
+}
+
+export function encodePublicProjectKey(config: FirebaseClientConfig): string {
+  return toBase64Url(JSON.stringify({ p: config.projectId.trim(), a: config.apiKey.trim() }));
+}
+
+export function decodePublicProjectKey(rawKey: string): FirebaseClientConfig | null {
+  const decoded = fromBase64Url(rawKey.trim());
+  if (!decoded) return null;
+  try {
+    const parsed = JSON.parse(decoded) as { p?: string; a?: string };
+    const projectId = typeof parsed.p === 'string' ? parsed.p.trim() : '';
+    const apiKey = typeof parsed.a === 'string' ? parsed.a.trim() : '';
+    if (!projectId || !apiKey) return null;
+    return {
+      projectId,
+      apiKey,
+      authDomain: `${projectId}.firebaseapp.com`,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function buildSharedWishlistUrl(
+  shareId: string,
+  config?: FirebaseClientConfig | null,
+  originOverride?: string
+): string {
+  const origin =
+    originOverride?.replace(/\/+$/, '') ||
+    (typeof window !== 'undefined' ? window.location.origin : 'https://localhost:3000');
+  const envCfg = getEnvFirebaseConfig();
+  const hasMatchingBuildEnv =
+    Boolean(envCfg) && (!config || envCfg?.projectId === config.projectId);
+
+  if (hasMatchingBuildEnv || !config) {
+    return `${origin}/w/${encodeURIComponent(shareId)}`;
+  }
+  const key = encodePublicProjectKey(config);
+  return `${origin}/w/${encodeURIComponent(shareId)}?k=${encodeURIComponent(key)}`;
+}
+
+export function initPublicViewerServices(fallbackKey?: string | null): {
+  app: FirebaseApp;
+  auth: Auth;
+  db: Firestore;
+} | null {
+  const primary = initFirebaseServices();
+  if (primary) {
+    return { app: primary.app, auth: primary.auth, db: primary.db };
+  }
+  if (!fallbackKey) return null;
+  const fallbackCfg =
+    decodePublicProjectKey(fallbackKey) || decodeFirebasePairingToken(fallbackKey)?.config || null;
+  if (!fallbackCfg) return null;
+
+  const appName = `public-viewer-${fallbackCfg.projectId}`;
+  const existing = getApps().find((a) => a.name === appName);
+  const app = existing || initializeApp(fallbackCfg, appName);
+  const auth = getAuth(app);
+  const db = getFirestore(app);
+  return { app, auth, db };
+}
+
+export function computePublishedItemsForLink(
+  link: SharedWishlistLink,
+  allWishes: WishItem[]
+): PublishedWishItem[] {
+  const wishIdSet = new Set(link.wishIds);
+  return [...allWishes]
+    .filter((w) => !w.received && (link.includeAllActive || wishIdSet.has(w.id)))
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+    .map((w, idx) => ({
+      id: w.id,
+      title: w.title,
+      url: link.includeUrls ? (w.url || '').trim() : '',
+      notes: link.includeNotes ? (w.notes || '').trim() : '',
+      priority: w.priority || 'medium',
+      order: idx,
+    }));
+}
+
+export async function publishSharedWishlistDoc(
+  link: SharedWishlistLink,
+  ownerUid: string,
+  allWishes: WishItem[]
+): Promise<void> {
+  const services = initFirebaseServices();
+  if (!services || !ownerUid) return;
+  const payload: PublicSharedWishlistDoc = {
+    id: link.id,
+    ownerUid,
+    title: link.title.trim() || 'Gift Wishlist',
+    ownerName: (link.ownerName || '').trim(),
+    items: computePublishedItemsForLink(link, allWishes),
+    createdAt: link.createdAt,
+    updatedAt: new Date().toISOString(),
+  };
+  await setDoc(doc(services.db, 'shared_wishlists', link.id), payload);
+}
+
+export async function syncAllSharedWishlistsForOwner(
+  links: SharedWishlistLink[],
+  ownerUid: string,
+  allWishes: WishItem[]
+): Promise<void> {
+  if (!ownerUid || links.length === 0) return;
+  await Promise.all(
+    links.map((link) =>
+      publishSharedWishlistDoc(link, ownerUid, allWishes).catch(() => {
+        // Ignore transient offline errors; Firestore retries/caches
+      })
+    )
+  );
+}
+
+export async function deletePublicSharedWishlistDoc(
+  shareId: string,
+  knownWishIds: string[] = []
+): Promise<void> {
+  const services = initFirebaseServices();
+  if (!services || !shareId) return;
+  // Blindly clean up any known item claim docs (without reading claims!) then delete parent doc
+  await Promise.all(
+    knownWishIds.map((wid) =>
+      deleteDoc(doc(services.db, 'shared_wishlists', shareId, 'claims', wid)).catch(() => {})
+    )
+  );
+  await deleteDoc(doc(services.db, 'shared_wishlists', shareId));
+}
+
+export async function clearPublicWishClaimsForOwner(
+  links: SharedWishlistLink[],
+  wishId: string
+): Promise<void> {
+  const services = initFirebaseServices();
+  if (!services || links.length === 0) return;
+  await Promise.all(
+    links.map((link) =>
+      deleteDoc(doc(services.db, 'shared_wishlists', link.id, 'claims', wishId)).catch(() => {})
+    )
+  );
+}
+
+export function subscribeToPublicWishlist(
+  db: Firestore,
+  shareId: string,
+  onDoc: (docData: PublicSharedWishlistDoc | null) => void,
+  onError?: (err: Error) => void
+): Unsubscribe {
+  return onSnapshot(
+    doc(db, 'shared_wishlists', shareId),
+    (snap) => {
+      if (!snap.exists()) {
+        onDoc(null);
+        return;
+      }
+      onDoc(snap.data() as PublicSharedWishlistDoc);
+    },
+    (err) => onError?.(err)
+  );
+}
+
+export function subscribeToPublicWishlistClaims(
+  db: Firestore,
+  shareId: string,
+  onClaims: (claimsMap: Record<string, SharedWishClaim>) => void,
+  onError?: (err: Error) => void
+): Unsubscribe {
+  return onSnapshot(
+    collection(db, 'shared_wishlists', shareId, 'claims'),
+    (snap) => {
+      const map: Record<string, SharedWishClaim> = {};
+      snap.docs.forEach((d) => {
+        const data = d.data() as SharedWishClaim;
+        map[d.id] = { ...data, wishId: data.wishId || d.id };
+      });
+      onClaims(map);
+    },
+    (err) => onError?.(err)
+  );
+}
+
+export async function claimPublicWishItem(
+  db: Firestore,
+  shareId: string,
+  claim: SharedWishClaim
+): Promise<{ ok: true } | { ok: false; claimedBy: string }> {
+  const claimRef = doc(db, 'shared_wishlists', shareId, 'claims', claim.wishId);
+  return runTransaction(db, async (tx) => {
+    const existing = await tx.get(claimRef);
+    if (existing.exists()) {
+      const data = existing.data() as Partial<SharedWishClaim>;
+      if (data.claimerToken !== claim.claimerToken) {
+        return { ok: false as const, claimedBy: data.claimedBy || 'Someone else' };
+      }
+    }
+    tx.set(claimRef, {
+      wishId: claim.wishId,
+      claimedBy: claim.claimedBy.trim().slice(0, 80),
+      claimerToken: claim.claimerToken,
+      purchased: Boolean(claim.purchased),
+      giverNote: (claim.giverNote || '').trim(),
+      claimedAt: claim.claimedAt,
+    });
+    return { ok: true as const };
+  });
+}
+
+export async function updatePublicWishClaim(
+  db: Firestore,
+  shareId: string,
+  wishId: string,
+  existing: SharedWishClaim,
+  patch: Partial<Pick<SharedWishClaim, 'purchased' | 'giverNote' | 'claimedBy'>>
+): Promise<void> {
+  const claimRef = doc(db, 'shared_wishlists', shareId, 'claims', wishId);
+  const merged = {
+    wishId,
+    claimedBy: (patch.claimedBy ?? existing.claimedBy).trim().slice(0, 80),
+    claimerToken: existing.claimerToken,
+    purchased: patch.purchased !== undefined ? patch.purchased : existing.purchased,
+    giverNote: patch.giverNote !== undefined ? patch.giverNote.trim() : existing.giverNote || '',
+    claimedAt: existing.claimedAt,
+  };
+  await setDoc(claimRef, merged);
+}
+
+export async function unclaimPublicWishItem(
+  db: Firestore,
+  shareId: string,
+  wishId: string
+): Promise<void> {
+  await deleteDoc(doc(db, 'shared_wishlists', shareId, 'claims', wishId));
 }

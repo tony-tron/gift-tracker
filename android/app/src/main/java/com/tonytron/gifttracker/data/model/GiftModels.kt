@@ -266,11 +266,75 @@ data class WishItem(
 }
 
 @Serializable
+data class SharedWishlistLink(
+    val id: String,
+    val title: String,
+    val ownerName: String = "",
+    val wishIds: List<String> = emptyList(),
+    val includeAllActive: Boolean = false,
+    val includeNotes: Boolean = true,
+    val includeUrls: Boolean = true,
+    val createdAt: String = Instant.now().toString(),
+    val updatedAt: String = Instant.now().toString()
+) {
+    fun computeActiveWishes(allWishes: List<WishItem>): List<WishItem> {
+        val idSet = wishIds.toSet()
+        return allWishes
+            .filter { !it.received && (includeAllActive || it.id in idSet) }
+            .sortedBy { it.order }
+    }
+
+    fun computePublishedItemMaps(allWishes: List<WishItem>): List<Map<String, Any?>> =
+        computeActiveWishes(allWishes).mapIndexed { idx, w ->
+            mapOf(
+                "id" to w.id,
+                "title" to w.title,
+                "url" to if (includeUrls) w.url.trim() else "",
+                "notes" to if (includeNotes) w.notes.trim() else "",
+                "priority" to w.priority.ifBlank { "medium" },
+                "order" to idx
+            )
+        }
+
+    fun toFirestoreMap(): Map<String, Any?> = mapOf(
+        "id" to id,
+        "title" to title,
+        "ownerName" to ownerName,
+        "wishIds" to wishIds,
+        "includeAllActive" to includeAllActive,
+        "includeNotes" to includeNotes,
+        "includeUrls" to includeUrls,
+        "createdAt" to createdAt,
+        "updatedAt" to updatedAt
+    )
+
+    companion object {
+        fun fromFirestoreMap(map: Map<String, Any?>, fallbackId: String): SharedWishlistLink {
+            val rawWishIds = (map["wishIds"] as? List<*>)
+                ?.mapNotNull { it as? String }
+                ?: emptyList()
+            return SharedWishlistLink(
+                id = (map["id"] as? String)?.takeIf { it.isNotBlank() } ?: fallbackId,
+                title = (map["title"] as? String) ?: "Gift Wishlist",
+                ownerName = (map["ownerName"] as? String) ?: "",
+                wishIds = rawWishIds,
+                includeAllActive = (map["includeAllActive"] as? Boolean) ?: false,
+                includeNotes = (map["includeNotes"] as? Boolean) ?: true,
+                includeUrls = (map["includeUrls"] as? Boolean) ?: true,
+                createdAt = (map["createdAt"] as? String) ?: "",
+                updatedAt = (map["updatedAt"] as? String) ?: ""
+            )
+        }
+    }
+}
+
+@Serializable
 data class GiftDataset(
     val people: List<Person> = emptyList(),
     val events: List<GiftEvent> = defaultEvents(),
     val gifts: List<GiftItem> = emptyList(),
-    val wishes: List<WishItem> = emptyList()
+    val wishes: List<WishItem> = emptyList(),
+    val sharedLinks: List<SharedWishlistLink> = emptyList()
 ) {
     companion object {
         fun defaultEvents(): List<GiftEvent> = listOf(
@@ -300,7 +364,8 @@ data class GiftDataset(
             people = emptyList(),
             events = defaultEvents(),
             gifts = emptyList(),
-            wishes = emptyList()
+            wishes = emptyList(),
+            sharedLinks = emptyList()
         )
     }
 }
@@ -318,10 +383,18 @@ data class FirebaseRuntimeConfig(
 object IdGenerator {
     val AVATAR_SHAPES = listOf("squircle", "cookie", "clover", "arch", "pill", "flower")
     val AVATAR_TONES = listOf("terracotta", "sage", "amber", "teal", "rose", "ochre")
+    private const val SHARE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"
+    private val secureRandom = java.security.SecureRandom()
 
     fun generate(prefix: String): String {
         val ts = java.lang.Long.toString(System.currentTimeMillis(), 36)
         val rand = UUID.randomUUID().toString().replace("-", "").take(4)
         return "$prefix-$ts-$rand"
+    }
+
+    fun generateShareId(length: Int = 14): String = buildString(length) {
+        repeat(length) {
+            append(SHARE_ALPHABET[secureRandom.nextInt(SHARE_ALPHABET.length)])
+        }
     }
 }

@@ -10,6 +10,7 @@ import com.tonytron.gifttracker.data.model.FirebaseRuntimeConfig
 import com.tonytron.gifttracker.data.model.GiftItem
 import com.tonytron.gifttracker.data.model.NavTab
 import com.tonytron.gifttracker.data.model.Person
+import com.tonytron.gifttracker.data.model.SharedWishlistLink
 import com.tonytron.gifttracker.data.model.ThemeSeed
 import com.tonytron.gifttracker.data.model.WishItem
 import com.tonytron.gifttracker.data.remote.LinkScraper
@@ -272,6 +273,63 @@ class GiftTrackerViewModel(application: Application) : AndroidViewModel(applicat
     fun deleteWish(id: String) {
         repository.deleteWish(id)
         showMessage("Removed from Wishlist")
+    }
+
+    fun setOwnerDisplayName(name: String?) {
+        viewModelScope.launch { repository.setOwnerDisplayName(name) }
+    }
+
+    fun createSharedWishlistLink(
+        title: String,
+        ownerName: String,
+        wishIds: List<String>,
+        includeAllActive: Boolean,
+        includeNotes: Boolean,
+        includeUrls: Boolean,
+        onCreated: (SharedWishlistLink) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            if (ownerName.isNotBlank()) {
+                repository.setOwnerDisplayName(ownerName)
+            }
+            repository.createSharedWishlistLink(
+                title = title,
+                ownerName = ownerName,
+                wishIds = wishIds,
+                includeAllActive = includeAllActive,
+                includeNotes = includeNotes,
+                includeUrls = includeUrls
+            ).onSuccess { link ->
+                showMessage("Created live link \"${link.title}\"!")
+                onCreated(link)
+            }.onFailure { err ->
+                showMessage(err.localizedMessage ?: "Failed to create live wishlist link")
+            }
+        }
+    }
+
+    fun updateSharedWishlistLink(link: SharedWishlistLink, onSaved: () -> Unit = {}) {
+        viewModelScope.launch {
+            if (link.ownerName.isNotBlank()) {
+                repository.setOwnerDisplayName(link.ownerName)
+            }
+            repository.updateSharedWishlistLink(link)
+                .onSuccess {
+                    showMessage("Updated \"${link.title}\"")
+                    onSaved()
+                }
+                .onFailure { err ->
+                    showMessage(err.localizedMessage ?: "Failed to update shared link")
+                }
+        }
+    }
+
+    fun deleteSharedWishlistLink(link: SharedWishlistLink) {
+        viewModelScope.launch {
+            repository.deleteSharedWishlistLink(link.id)
+                .onSuccess { showMessage("Revoked link \"${link.title}\"") }
+                .onFailure { err -> showMessage(err.localizedMessage ?: "Failed to revoke link") }
+        }
     }
 
     // Settings

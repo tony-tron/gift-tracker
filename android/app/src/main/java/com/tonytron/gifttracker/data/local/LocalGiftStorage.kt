@@ -24,7 +24,8 @@ data class UserPreferences(
     val colorMode: ColorMode = ColorMode.SYSTEM,
     val selectedEventId: String = "2026-christmas",
     val runtimeFirebaseConfig: FirebaseRuntimeConfig? = null,
-    val webAppUrl: String? = null
+    val webAppUrl: String? = null,
+    val ownerDisplayName: String? = null
 )
 
 class LocalGiftStorage(private val context: Context) {
@@ -59,7 +60,8 @@ class LocalGiftStorage(private val context: Context) {
             colorMode = ColorMode.fromKey(prefs[KEY_COLOR_MODE]),
             selectedEventId = prefs[KEY_SELECTED_EVENT] ?: "2026-christmas",
             runtimeFirebaseConfig = fbCfg,
-            webAppUrl = prefs[KEY_WEB_APP_URL]?.takeIf { it.isNotBlank() }
+            webAppUrl = prefs[KEY_WEB_APP_URL]?.takeIf { it.isNotBlank() },
+            ownerDisplayName = prefs[KEY_OWNER_DISPLAY_NAME]?.takeIf { it.isNotBlank() }
         )
     }
 
@@ -122,6 +124,17 @@ class LocalGiftStorage(private val context: Context) {
         }
     }
 
+    suspend fun setOwnerDisplayName(name: String?) {
+        context.appDataStore.edit { prefs ->
+            val clean = name?.trim()
+            if (clean.isNullOrBlank()) {
+                prefs.remove(KEY_OWNER_DISPLAY_NAME)
+            } else {
+                prefs[KEY_OWNER_DISPLAY_NAME] = clean
+            }
+        }
+    }
+
     companion object {
         const val DATASET_FILENAME = "gift_tracker_dataset_v1.json"
 
@@ -130,6 +143,7 @@ class LocalGiftStorage(private val context: Context) {
         private val KEY_SELECTED_EVENT = stringPreferencesKey("selected_event_id")
         private val KEY_FIREBASE_CONFIG = stringPreferencesKey("firebase_runtime_config")
         private val KEY_WEB_APP_URL = stringPreferencesKey("web_app_url")
+        private val KEY_OWNER_DISPLAY_NAME = stringPreferencesKey("owner_display_name")
 
         /**
          * Fast helper also used by the Glance AppWidget process/coroutine to render the latest snapshot.
@@ -143,7 +157,8 @@ class LocalGiftStorage(private val context: Context) {
                 decoded.copy(
                     people = decoded.people.sortedBy { it.order },
                     events = decoded.events.ifEmpty { GiftDataset.defaultEvents() },
-                    wishes = decoded.wishes.sortedBy { it.order }
+                    wishes = decoded.wishes.sortedBy { it.order },
+                    sharedLinks = decoded.sharedLinks.sortedByDescending { it.createdAt }
                 )
             }.getOrDefault(GiftDataset.EMPTY)
         }

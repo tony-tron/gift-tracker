@@ -4,15 +4,21 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -20,7 +26,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.Add
@@ -31,23 +39,29 @@ import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
+import androidx.compose.material.icons.rounded.Link
+import androidx.compose.material.icons.rounded.QrCode2
 import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonGroupDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilledTonalToggleButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -56,6 +70,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
@@ -63,7 +80,12 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.EncodeHintType
+import com.google.zxing.qrcode.QRCodeWriter
+import com.tonytron.gifttracker.data.model.SharedWishlistLink
 import com.tonytron.gifttracker.data.model.WishItem
+import com.tonytron.gifttracker.data.remote.FirebaseSyncManager
 import com.tonytron.gifttracker.ui.GiftTrackerViewModel
 
 @Composable
@@ -72,7 +94,6 @@ fun WishlistScreen(
     contentPadding: PaddingValues
 ) {
     val dataset by viewModel.dataset.collectAsStateWithLifecycle()
-    val context = LocalContext.current
     val uriHandler = LocalUriHandler.current
 
     var filter by rememberSaveable { mutableStateOf("wanted") } // wanted | received
@@ -92,7 +113,7 @@ fun WishlistScreen(
     var fromInput by rememberSaveable { mutableStateOf("") }
     var whenInput by rememberSaveable { mutableStateOf("Christmas 2026") }
 
-    // Share Selection Dialog state
+    // Share Selection Sheet state
     var showShareDialog by rememberSaveable { mutableStateOf(false) }
 
     // Reorder mode state
@@ -135,19 +156,23 @@ fun WishlistScreen(
                             style = MaterialTheme.typography.titleLarge
                         )
                         Text(
-                            "Keep ideas for yourself handy and share a selected or full list via Android Share Sheet.",
+                            "Share separate live group checklists so friends & family don't duplicate gifts.",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                     Spacer(Modifier.width(12.dp))
                     Button(
-                        enabled = wantedWishes.isNotEmpty(),
+                        enabled = wantedWishes.isNotEmpty() || dataset.sharedLinks.isNotEmpty(),
                         onClick = { showShareDialog = true }
                     ) {
                         Icon(Icons.Rounded.Share, null, Modifier.size(16.dp))
                         Spacer(Modifier.width(6.dp))
-                        Text("Share")
+                        Text(
+                            if (dataset.sharedLinks.isNotEmpty())
+                                "Share (${dataset.sharedLinks.size})"
+                            else "Share"
+                        )
                     }
                 }
             }
@@ -500,29 +525,64 @@ fun WishlistScreen(
         }
     }
 
-    // Share Selection Dialog
+    // Share & Manage Group Links Sheet
     if (showShareDialog) {
-        ShareWishlistDialog(
+        ShareWishlistSheet(
+            viewModel = viewModel,
             wishes = wantedWishes,
+            allWishes = sortedWishes,
+            sharedLinks = dataset.sharedLinks,
             onDismiss = { showShareDialog = false }
         )
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ShareWishlistDialog(
+private fun ShareWishlistSheet(
+    viewModel: GiftTrackerViewModel,
     wishes: List<WishItem>,
+    allWishes: List<WishItem>,
+    sharedLinks: List<SharedWishlistLink>,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
+    val uriHandler = LocalUriHandler.current
+    val prefs by viewModel.preferences.collectAsStateWithLifecycle()
+    val cloudState by viewModel.cloudState.collectAsStateWithLifecycle()
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    var activeTab by remember {
+        mutableStateOf(if (wishes.isEmpty() && sharedLinks.isNotEmpty()) "manage" else "create")
+    }
+
+    // Create / Edit link state
+    var editingLink by remember { mutableStateOf<SharedWishlistLink?>(null) }
+    var groupTitle by rememberSaveable { mutableStateOf("Family & Friends Wishlist") }
+    var ownerName by remember(prefs.ownerDisplayName, cloudState.userLabel) {
+        mutableStateOf(
+            prefs.ownerDisplayName
+                ?: cloudState.userLabel?.substringBefore("@")?.substringBefore(" ")
+                ?: ""
+        )
+    }
+    var webAppUrlInput by remember(prefs.webAppUrl) {
+        mutableStateOf(prefs.webAppUrl.orEmpty())
+    }
     var selectedIds by remember { mutableStateOf(wishes.map { it.id }.toSet()) }
+    var includeAllActive by rememberSaveable { mutableStateOf(false) }
     var includeNotes by rememberSaveable { mutableStateOf(true) }
     var includeUrls by rememberSaveable { mutableStateOf(true) }
 
-    val allSelected = selectedIds.size == wishes.size && wishes.isNotEmpty()
+    // Manage tab QR & revoke confirmation state
+    var qrLinkId by remember { mutableStateOf<String?>(null) }
+    var confirmRevokeLink by remember { mutableStateOf<SharedWishlistLink?>(null) }
 
-    val formattedShareText = remember(selectedIds, includeNotes, includeUrls, wishes) {
-        val selected = wishes.filter { it.id in selectedIds }
+    val allSelected = selectedIds.size == wishes.size && wishes.isNotEmpty()
+    val isSignedInCloud = cloudState.userUid != null
+
+    val formattedShareText = remember(selectedIds, includeAllActive, includeNotes, includeUrls, wishes, groupTitle) {
+        val selected = wishes.filter { includeAllActive || it.id in selectedIds }
         if (selected.isEmpty()) ""
         else {
             val lines = selected.mapIndexed { idx, w ->
@@ -532,85 +592,528 @@ private fun ShareWishlistDialog(
                     if (includeNotes && w.notes.isNotBlank()) append("\n   Note: ${w.notes}")
                 }
             }
-            "🎁 My Gift Wishlist (${selected.size} items):\n\n${lines.joinToString("\n\n")}"
+            val heading = groupTitle.trim().ifBlank { "My Gift Wishlist" }
+            "🎁 $heading (${selected.size} items):\n\n${lines.joinToString("\n\n")}"
         }
     }
 
-    AlertDialog(
+    ModalBottomSheet(
         onDismissRequest = onDismiss,
-        title = {
-            Column {
-                Text("Share Wishlist", style = MaterialTheme.typography.titleLarge)
+        sheetState = sheetState
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 32.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(
-                    "Select which wishes to include in your shared list:",
+                    "COLLABORATIVE WISHLIST SHARING",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Text(
+                    if (editingLink != null) "Edit Group Wishlist Link" else "Share Personal Wishlist",
+                    style = MaterialTheme.typography.titleLarge
+                )
+                Text(
+                    "Share separate live checklists with different groups — they coordinate claims together while surprises stay hidden from you.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-        },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                // Toolbar row: Select All + Toggles
-                Row(
+
+            // Connected ButtonGroup: New Share Link vs Active Links
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(ButtonGroupDefaults.ConnectedSpaceBetween)
+            ) {
+                FilledTonalToggleButton(
+                    checked = activeTab == "create",
+                    onCheckedChange = { activeTab = "create" },
+                    modifier = Modifier.weight(1f),
+                    shapes = ButtonGroupDefaults.connectedLeadingButtonShapes()
+                ) {
+                    Icon(Icons.Rounded.Add, null, Modifier.size(16.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text(if (editingLink != null) "Editing Link" else "New Link / Text", fontSize = 12.sp)
+                }
+                FilledTonalToggleButton(
+                    checked = activeTab == "manage",
+                    onCheckedChange = {
+                        editingLink = null
+                        activeTab = "manage"
+                    },
+                    modifier = Modifier.weight(1f),
+                    shapes = ButtonGroupDefaults.connectedTrailingButtonShapes()
+                ) {
+                    Icon(Icons.Rounded.Link, null, Modifier.size(16.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("Active Links (${sharedLinks.size})", fontSize = 12.sp)
+                }
+            }
+
+            if (activeTab == "create") {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = groupTitle,
+                        onValueChange = { groupTitle = it },
+                        label = { Text("Group Label (e.g., Family, Friends)") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1.4f)
+                    )
+                    OutlinedTextField(
+                        value = ownerName,
+                        onValueChange = { ownerName = it },
+                        label = { Text("Your Name") },
+                        singleLine = true,
+                        modifier = Modifier.weight(0.9f)
+                    )
+                }
+
+                if (isSignedInCloud && prefs.webAppUrl.isNullOrBlank()) {
+                    OutlinedTextField(
+                        value = webAppUrlInput,
+                        onValueChange = { webAppUrlInput = it },
+                        label = { Text("Hosted Web App URL (saved for all links)") },
+                        placeholder = { Text("https://your-gift-tracker.hosted.app") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+
+                // Select All + Checkboxes
+                FlowRow(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalArrangement = Arrangement.Center
                 ) {
                     FilledTonalButton(
                         onClick = {
-                            selectedIds = if (allSelected) emptySet() else wishes.map { it.id }.toSet()
+                            if (allSelected) {
+                                selectedIds = emptySet()
+                                includeAllActive = false
+                            } else {
+                                selectedIds = wishes.map { it.id }.toSet()
+                            }
                         }
                     ) {
-                        Text(if (allSelected) "Deselect All" else "Select All (${selectedIds.size}/${wishes.size})", fontSize = 12.sp)
+                        Text(
+                            if (allSelected) "Deselect All" else "Select All (${selectedIds.size}/${wishes.size})",
+                            fontSize = 12.sp
+                        )
                     }
 
                     Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(
+                            checked = includeAllActive,
+                            onCheckedChange = {
+                                includeAllActive = it
+                                if (it) selectedIds = wishes.map { w -> w.id }.toSet()
+                            }
+                        )
+                        Text("Auto-add new", fontSize = 11.sp)
+                        Spacer(Modifier.width(4.dp))
                         Checkbox(checked = includeNotes, onCheckedChange = { includeNotes = it })
-                        Text("Notes", fontSize = 12.sp)
-                        Spacer(Modifier.width(6.dp))
+                        Text("Notes", fontSize = 11.sp)
+                        Spacer(Modifier.width(4.dp))
                         Checkbox(checked = includeUrls, onCheckedChange = { includeUrls = it })
-                        Text("Links", fontSize = 12.sp)
+                        Text("Links", fontSize = 11.sp)
                     }
                 }
 
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(240.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    items(wishes, key = { it.id }) { wish ->
-                        val isChecked = wish.id in selectedIds
-                        Surface(
-                            onClick = {
-                                selectedIds = if (isChecked) selectedIds - wish.id else selectedIds + wish.id
-                            },
-                            shape = RoundedCornerShape(12.dp),
-                            color = if (isChecked) MaterialTheme.colorScheme.secondaryContainer
-                            else MaterialTheme.colorScheme.surfaceContainerHigh
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 8.dp, vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Checkbox(
-                                    checked = isChecked,
-                                    onCheckedChange = {
-                                        selectedIds = if (isChecked) selectedIds - wish.id else selectedIds + wish.id
+                // Wish Selection List
+                if (wishes.isEmpty()) {
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainer,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            "No active wishes right now. Check \"Auto-add new\" to create a live link ready for future wishes!",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(14.dp)
+                        )
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 220.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        items(wishes, key = { it.id }) { wish ->
+                            val isChecked = includeAllActive || wish.id in selectedIds
+                            Surface(
+                                onClick = {
+                                    if (isChecked) {
+                                        selectedIds = selectedIds - wish.id
+                                        includeAllActive = false
+                                    } else {
+                                        selectedIds = selectedIds + wish.id
                                     }
-                                )
-                                Spacer(Modifier.width(6.dp))
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(wish.title, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                                    if (wish.notes.isNotBlank()) {
-                                        Text(
-                                            wish.notes,
-                                            fontSize = 11.sp,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            maxLines = 1
+                                },
+                                shape = RoundedCornerShape(12.dp),
+                                color = if (isChecked) MaterialTheme.colorScheme.secondaryContainer
+                                else MaterialTheme.colorScheme.surfaceContainerHigh
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Checkbox(
+                                        checked = isChecked,
+                                        onCheckedChange = {
+                                            if (isChecked) {
+                                                selectedIds = selectedIds - wish.id
+                                                includeAllActive = false
+                                            } else {
+                                                selectedIds = selectedIds + wish.id
+                                            }
+                                        }
+                                    )
+                                    Spacer(Modifier.width(6.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(wish.title, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                                        if (wish.notes.isNotBlank()) {
+                                            Text(
+                                                wish.notes,
+                                                fontSize = 11.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                maxLines = 1
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (!isSignedInCloud) {
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainer,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            "💡 Sign in to Cloud Sync in Settings to publish live collaborative group links. You can still copy or share a plain-text list below.",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(12.dp)
+                        )
+                    }
+                }
+
+                val canPublish = includeAllActive || selectedIds.isNotEmpty()
+
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    if (editingLink != null) {
+                        TextButton(
+                            onClick = {
+                                editingLink = null
+                                groupTitle = "Family & Friends Wishlist"
+                                selectedIds = wishes.map { it.id }.toSet()
+                                includeAllActive = false
+                            }
+                        ) {
+                            Text("Cancel Edit")
+                        }
+                        Spacer(Modifier.width(6.dp))
+                    } else {
+                        TextButton(
+                            enabled = formattedShareText.isNotBlank(),
+                            onClick = {
+                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                clipboard.setPrimaryClip(ClipData.newPlainText("Gift Wishlist", formattedShareText))
+                                viewModel.showMessage("Copied plain-text wishlist!")
+                            }
+                        ) {
+                            Icon(Icons.Rounded.ContentCopy, null, Modifier.size(15.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Copy Text")
+                        }
+
+                        if (!isSignedInCloud) {
+                            Spacer(Modifier.width(6.dp))
+                            Button(
+                                enabled = formattedShareText.isNotBlank(),
+                                onClick = {
+                                    val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                                        type = "text/plain"
+                                        putExtra(Intent.EXTRA_SUBJECT, groupTitle.ifBlank { "My Gift Wishlist" })
+                                        putExtra(Intent.EXTRA_TEXT, formattedShareText)
+                                    }
+                                    context.startActivity(Intent.createChooser(sendIntent, "Share Wishlist"))
+                                    onDismiss()
+                                }
+                            ) {
+                                Icon(Icons.Rounded.Share, null, Modifier.size(15.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("Share Text")
+                            }
+                        }
+                    }
+
+                    if (isSignedInCloud) {
+                        Spacer(Modifier.width(6.dp))
+                        Button(
+                            enabled = canPublish,
+                            onClick = {
+                                if (webAppUrlInput.isNotBlank()) {
+                                    viewModel.setWebAppUrl(webAppUrlInput)
+                                }
+                                val chosenIds = if (includeAllActive) wishes.map { it.id } else selectedIds.toList()
+                                val currentEditing = editingLink
+                                if (currentEditing != null) {
+                                    viewModel.updateSharedWishlistLink(
+                                        currentEditing.copy(
+                                            title = groupTitle.trim().ifBlank { "Gift Wishlist" },
+                                            ownerName = ownerName.trim(),
+                                            wishIds = chosenIds,
+                                            includeAllActive = includeAllActive,
+                                            includeNotes = includeNotes,
+                                            includeUrls = includeUrls
                                         )
+                                    ) {
+                                        editingLink = null
+                                        activeTab = "manage"
+                                    }
+                                } else {
+                                    viewModel.createSharedWishlistLink(
+                                        title = groupTitle,
+                                        ownerName = ownerName,
+                                        wishIds = chosenIds,
+                                        includeAllActive = includeAllActive,
+                                        includeNotes = includeNotes,
+                                        includeUrls = includeUrls
+                                    ) { created ->
+                                        val effectiveWeb = webAppUrlInput.trim().ifBlank { prefs.webAppUrl.orEmpty() }
+                                        if (effectiveWeb.isNotBlank()) {
+                                            val url = FirebaseSyncManager.buildSharedWishlistUrl(
+                                                created.id,
+                                                cloudState.exportableConfig,
+                                                effectiveWeb
+                                            )
+                                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                            clipboard.setPrimaryClip(ClipData.newPlainText(created.title, url))
+                                        }
+                                        qrLinkId = created.id
+                                        activeTab = "manage"
+                                    }
+                                }
+                            }
+                        ) {
+                            Icon(Icons.Rounded.Share, null, Modifier.size(15.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text(if (editingLink != null) "Save Changes" else "Create Live Group Link")
+                        }
+                    }
+                }
+            } else {
+                // Manage Active Links Tab
+                if (prefs.webAppUrl.isNullOrBlank()) {
+                    OutlinedTextField(
+                        value = webAppUrlInput,
+                        onValueChange = { webAppUrlInput = it },
+                        label = { Text("Hosted Web App URL (required for shareable web URL)") },
+                        placeholder = { Text("https://your-gift-tracker.hosted.app") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+
+                if (sharedLinks.isEmpty()) {
+                    Surface(
+                        shape = RoundedCornerShape(18.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainer,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(20.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                "No active group wishlist links yet.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Button(onClick = { activeTab = "create" }) {
+                                Icon(Icons.Rounded.Add, null, Modifier.size(16.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("Create First Group Link")
+                            }
+                        }
+                    }
+                } else {
+                    sharedLinks.forEach { link ->
+                        val activeCount = remember(link, allWishes) {
+                            link.computeActiveWishes(allWishes).size
+                        }
+                        val effectiveWeb = webAppUrlInput.trim().ifBlank { prefs.webAppUrl.orEmpty() }
+                        val shareUrl = remember(link.id, cloudState.exportableConfig, effectiveWeb) {
+                            if (effectiveWeb.isBlank()) ""
+                            else FirebaseSyncManager.buildSharedWishlistUrl(
+                                link.id,
+                                cloudState.exportableConfig,
+                                effectiveWeb
+                            )
+                        }
+                        val isShowingQr = qrLinkId == link.id
+
+                        Card(
+                            shape = RoundedCornerShape(20.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(14.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            link.title,
+                                            style = MaterialTheme.typography.titleMedium,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Text(
+                                            buildString {
+                                                append("$activeCount active wish${if (activeCount == 1) "" else "es"}")
+                                                if (link.includeAllActive) append(" • Auto-adds new")
+                                                if (link.ownerName.isNotBlank()) append(" • ${link.ownerName}")
+                                            },
+                                            fontSize = 12.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+
+                                    Row {
+                                        IconButton(
+                                            onClick = {
+                                                editingLink = link
+                                                groupTitle = link.title
+                                                ownerName = link.ownerName.ifBlank { ownerName }
+                                                selectedIds = if (link.includeAllActive) {
+                                                    wishes.map { it.id }.toSet()
+                                                } else {
+                                                    link.wishIds.toSet()
+                                                }
+                                                includeAllActive = link.includeAllActive
+                                                includeNotes = link.includeNotes
+                                                includeUrls = link.includeUrls
+                                                activeTab = "create"
+                                            }
+                                        ) {
+                                            Icon(Icons.Rounded.Edit, contentDescription = "Edit group link")
+                                        }
+                                        IconButton(onClick = { confirmRevokeLink = link }) {
+                                            Icon(Icons.Rounded.DeleteOutline, contentDescription = "Revoke link")
+                                        }
+                                    }
+                                }
+
+                                if (isShowingQr && shareUrl.isNotBlank()) {
+                                    val qrBitmap = remember(shareUrl) { generateShareQrBitmap(shareUrl) }
+                                    if (qrBitmap != null) {
+                                        Box(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Surface(
+                                                shape = RoundedCornerShape(16.dp),
+                                                color = Color.White,
+                                                shadowElevation = 2.dp
+                                            ) {
+                                                Image(
+                                                    bitmap = qrBitmap,
+                                                    contentDescription = "QR Code for ${link.title}",
+                                                    modifier = Modifier
+                                                        .padding(10.dp)
+                                                        .size(168.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+
+                                FlowRow(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Button(
+                                        enabled = shareUrl.isNotBlank(),
+                                        onClick = {
+                                            if (webAppUrlInput.isNotBlank()) viewModel.setWebAppUrl(webAppUrlInput)
+                                            val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                                                type = "text/plain"
+                                                putExtra(Intent.EXTRA_SUBJECT, link.title)
+                                                val prefix = if (link.ownerName.isNotBlank()) "${link.ownerName}'s" else "My"
+                                                putExtra(
+                                                    Intent.EXTRA_TEXT,
+                                                    "🎁 $prefix live wishlist (${link.title}) — claim items here so nobody duplicates gifts:\n$shareUrl"
+                                                )
+                                            }
+                                            context.startActivity(Intent.createChooser(sendIntent, "Share Group Wishlist"))
+                                        }
+                                    ) {
+                                        Icon(Icons.Rounded.Share, null, Modifier.size(15.dp))
+                                        Spacer(Modifier.width(5.dp))
+                                        Text("Share")
+                                    }
+
+                                    FilledTonalButton(
+                                        enabled = shareUrl.isNotBlank(),
+                                        onClick = {
+                                            if (webAppUrlInput.isNotBlank()) viewModel.setWebAppUrl(webAppUrlInput)
+                                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                            clipboard.setPrimaryClip(ClipData.newPlainText(link.title, shareUrl))
+                                            viewModel.showMessage("Copied link for \"${link.title}\"!")
+                                        }
+                                    ) {
+                                        Icon(Icons.Rounded.ContentCopy, null, Modifier.size(15.dp))
+                                        Spacer(Modifier.width(5.dp))
+                                        Text("Copy")
+                                    }
+
+                                    FilledTonalButton(
+                                        enabled = shareUrl.isNotBlank(),
+                                        onClick = {
+                                            if (webAppUrlInput.isNotBlank()) viewModel.setWebAppUrl(webAppUrlInput)
+                                            qrLinkId = if (isShowingQr) null else link.id
+                                        }
+                                    ) {
+                                        Icon(Icons.Rounded.QrCode2, null, Modifier.size(15.dp))
+                                        Spacer(Modifier.width(5.dp))
+                                        Text(if (isShowingQr) "Hide QR" else "QR")
+                                    }
+
+                                    if (shareUrl.isNotBlank()) {
+                                        TextButton(
+                                            onClick = {
+                                                if (webAppUrlInput.isNotBlank()) viewModel.setWebAppUrl(webAppUrlInput)
+                                                runCatching { uriHandler.openUri(shareUrl) }
+                                            }
+                                        ) {
+                                            Icon(Icons.AutoMirrored.Rounded.OpenInNew, null, Modifier.size(15.dp))
+                                            Spacer(Modifier.width(4.dp))
+                                            Text("Preview")
+                                        }
                                     }
                                 }
                             }
@@ -618,44 +1121,47 @@ private fun ShareWishlistDialog(
                     }
                 }
             }
-        },
-        confirmButton = {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(
-                    enabled = selectedIds.isNotEmpty(),
-                    onClick = {
-                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                        clipboard.setPrimaryClip(ClipData.newPlainText("Gift Wishlist", formattedShareText))
-                        onDismiss()
-                    }
-                ) {
-                    Icon(Icons.Rounded.ContentCopy, null, Modifier.size(16.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("Copy")
-                }
-
-                Button(
-                    enabled = selectedIds.isNotEmpty(),
-                    onClick = {
-                        val sendIntent = Intent(Intent.ACTION_SEND).apply {
-                            type = "text/plain"
-                            putExtra(Intent.EXTRA_SUBJECT, "My Gift Wishlist")
-                            putExtra(Intent.EXTRA_TEXT, formattedShareText)
-                        }
-                        context.startActivity(Intent.createChooser(sendIntent, "Share Wishlist"))
-                        onDismiss()
-                    }
-                ) {
-                    Icon(Icons.Rounded.Share, null, Modifier.size(16.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("Share (${selectedIds.size})")
-                }
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
-            }
         }
-    )
+    }
+
+    confirmRevokeLink?.let { target ->
+        AlertDialog(
+            onDismissRequest = { confirmRevokeLink = null },
+            title = { Text("Revoke \"${target.title}\"?") },
+            text = { Text("People with this link will no longer be able to view or claim items on this group checklist.") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.deleteSharedWishlistLink(target)
+                        confirmRevokeLink = null
+                    }
+                ) {
+                    Text("Revoke Link")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmRevokeLink = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
 }
+
+private fun generateShareQrBitmap(content: String, sizePx: Int = 480): ImageBitmap? = runCatching {
+    val hints = mapOf(
+        EncodeHintType.MARGIN to 1,
+        EncodeHintType.CHARACTER_SET to "UTF-8"
+    )
+    val matrix = QRCodeWriter().encode(content, BarcodeFormat.QR_CODE, sizePx, sizePx, hints)
+    val pixels = IntArray(sizePx * sizePx)
+    val dark = android.graphics.Color.rgb(20, 18, 24)
+    val light = android.graphics.Color.WHITE
+    for (y in 0 until sizePx) {
+        val offset = y * sizePx
+        for (x in 0 until sizePx) {
+            pixels[offset + x] = if (matrix.get(x, y)) dark else light
+        }
+    }
+    Bitmap.createBitmap(pixels, sizePx, sizePx, Bitmap.Config.ARGB_8888).asImageBitmap()
+}.getOrNull()

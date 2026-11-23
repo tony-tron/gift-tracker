@@ -18,7 +18,9 @@ import com.tonytron.gifttracker.data.model.GiftDataset
 import com.tonytron.gifttracker.data.model.GiftEvent
 import com.tonytron.gifttracker.data.model.GiftItem
 import com.tonytron.gifttracker.data.model.Person
+import com.tonytron.gifttracker.data.model.SharedWishlistLink
 import com.tonytron.gifttracker.data.model.WishItem
+import java.time.Instant
 import kotlinx.coroutines.tasks.await
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
@@ -202,6 +204,9 @@ class FirebaseSyncManager(private val appContext: Context) {
         dataset.wishes.forEach { w ->
             ops += root.collection("wishes").document(w.id) to w.toFirestoreMap()
         }
+        dataset.sharedLinks.forEach { s ->
+            ops += root.collection("shared_links").document(s.id) to s.toFirestoreMap()
+        }
 
         ops.chunked(400).forEach { chunk ->
             val batch = db.batch()
@@ -241,6 +246,70 @@ class FirebaseSyncManager(private val appContext: Context) {
             .await()
     }
 
+    suspend fun publishSharedWishlistDoc(
+        app: FirebaseApp,
+        ownerUid: String,
+        link: SharedWishlistLink,
+        allWishes: List<WishItem>
+    ) {
+        val db = FirebaseFirestore.getInstance(app)
+        val payload = mapOf(
+            "id" to link.id,
+            "ownerUid" to ownerUid,
+            "title" to link.title.trim().ifBlank { "Gift Wishlist" },
+            "ownerName" to link.ownerName.trim(),
+            "items" to link.computePublishedItemMaps(allWishes),
+            "createdAt" to link.createdAt,
+            "updatedAt" to Instant.now().toString()
+        )
+        db.collection("shared_wishlists")
+            .document(link.id)
+            .set(payload)
+            .await()
+    }
+
+    suspend fun syncAllSharedWishlistsForOwner(
+        app: FirebaseApp,
+        ownerUid: String,
+        links: List<SharedWishlistLink>,
+        allWishes: List<WishItem>
+    ) {
+        links.forEach { link ->
+            runCatching { publishSharedWishlistDoc(app, ownerUid, link, allWishes) }
+        }
+    }
+
+    suspend fun deletePublicSharedWishlistDoc(
+        app: FirebaseApp,
+        shareId: String,
+        knownWishIds: List<String> = emptyList()
+    ) {
+        val db = FirebaseFirestore.getInstance(app)
+        val shareRef = db.collection("shared_wishlists").document(shareId)
+        knownWishIds.forEach { wid ->
+            runCatching { shareRef.collection("claims").document(wid).delete().await() }
+        }
+        shareRef.delete().await()
+    }
+
+    suspend fun clearPublicWishClaimsForOwner(
+        app: FirebaseApp,
+        links: List<SharedWishlistLink>,
+        wishId: String
+    ) {
+        val db = FirebaseFirestore.getInstance(app)
+        links.forEach { link ->
+            runCatching {
+                db.collection("shared_wishlists")
+                    .document(link.id)
+                    .collection("claims")
+                    .document(wishId)
+                    .delete()
+                    .await()
+            }
+        }
+    }
+
     fun subscribeToWorkspace(
         app: FirebaseApp,
         uid: String,
@@ -248,6 +317,7 @@ class FirebaseSyncManager(private val appContext: Context) {
         onEvents: (List<GiftEvent>) -> Unit,
         onGifts: (List<GiftItem>) -> Unit,
         onWishes: (List<WishItem>) -> Unit,
+        onSharedLinks: (List<SharedWishlistLink>) -> Unit,
         onError: (Exception) -> Unit
     ) {
         clearWorkspaceListeners()
@@ -305,6 +375,19 @@ class FirebaseSyncManager(private val appContext: Context) {
                 onWishes(items)
             }
         }
+
+        snapshotRegistrations += root.collection("shared_links").addSnapshotListener { snap, err ->
+            if (err != null) {
+                onError(err)
+                return@addSnapshotListener
+            }
+            if (snap != null) {
+                val items = snap.documents
+                    .mapNotNull { d -> d.data?.let { SharedWishlistLink.fromFirestoreMap(it, d.id) } }
+                    .sortedByDescending { it.createdAt }
+                onSharedLinks(items)
+            }
+        }
     }
 
     private fun getResourceString(name: String): String? {
@@ -333,6 +416,26 @@ class FirebaseSyncManager(private val appContext: Context) {
             val config: FirebaseRuntimeConfig,
             val webUrl: String? = null
         )
+
+        fun buildSharedWishlistUrl(
+            shareId: String,
+            config: FirebaseRuntimeConfig?,
+            webUrl: String
+        ): String {
+            val base = webUrl.trim().trimEnd('/')
+            if (config == null) {
+                return "$base/w/${android.net.Uri.encode(shareId)}"
+            }
+            val keyPayload = buildJsonObject {
+                put("p", config.projectId.trim())
+                put("a", config.apiKey.trim())
+            }.toString()
+            val encodedKey = android.util.Base64.encodeToString(
+                keyPayload.toByteArray(Charsets.UTF_8),
+                android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING
+            )
+            return "$base/w/${android.net.Uri.encode(shareId)}?k=${android.net.Uri.encode(encodedKey)}"
+        }
 
         fun encodePairingToken(config: FirebaseRuntimeConfig, webUrl: String? = null): String {
             val payload = buildJsonObject {
