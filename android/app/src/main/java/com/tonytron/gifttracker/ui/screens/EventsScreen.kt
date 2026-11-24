@@ -282,7 +282,11 @@ fun EventsScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column {
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .then(if (isTwoPane) Modifier.padding(end = 12.dp) else Modifier)
+                        ) {
                             Text(
                                 text = if (totalBudget > 0) "$${"%.0f".format(spent)} / $${"%.0f".format(totalBudget)}"
                                 else "$${"%.0f".format(spent)} Planned",
@@ -296,15 +300,17 @@ fun EventsScreen(
                             )
                         }
 
-                        FilledTonalButton(
-                            onClick = {
-                                val target = if (isYear2026Mode) "2026-christmas" else selectedEventId
-                                viewModel.openNewGiftComposer(eventId = target)
+                        if (isTwoPane) {
+                            FilledTonalButton(
+                                onClick = {
+                                    val target = if (isYear2026Mode) "2026-christmas" else selectedEventId
+                                    viewModel.openNewGiftComposer(eventId = target)
+                                }
+                            ) {
+                                Icon(Icons.Rounded.Add, null, Modifier.size(18.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("Add Gift", maxLines = 1, softWrap = false)
                             }
-                        ) {
-                            Icon(Icons.Rounded.Add, null, Modifier.size(18.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text("Add Gift")
                         }
                     }
 

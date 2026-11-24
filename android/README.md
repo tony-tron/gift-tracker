@@ -1,6 +1,6 @@
-# Gift Tracker — Native Android App (Material 3 Expressive + Glance Widget)
+# Gift Tracker — Native Android App
 
-Native Android client for **Gift Tracker**, built with **Kotlin**, **Jetpack Compose Material 3 Expressive (`1.5.0`)**, **Jetpack Glance (`1.2.0`)**, **Credential Manager**, and **Firebase Cloud Firestore** — sharing 100% real-time database & JSON backup compatibility with [`/web`](../web).
+Native Android client for **Gift Tracker**, built with **Kotlin**, **Jetpack Compose**, **Jetpack Glance (`1.2.0`)**, **Credential Manager**, and **Firebase Cloud Firestore** — sharing 100% real-time database & JSON backup compatibility with [`/web`](../web).
 
 ## Key Features & Latest Android APIs
 

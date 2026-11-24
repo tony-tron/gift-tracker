@@ -5,7 +5,7 @@ export default function manifest(): MetadataRoute.Manifest {
     name: 'Gift Tracker',
     short_name: 'Gifts',
     description:
-      'Material 3 Expressive Gift Tracker synced across Android phones, foldables, and Googlebook.',
+      'Personal gift tracking app synced across Android phones, foldables, and desktop.',
     start_url: '/',
     scope: '/',
     display: 'standalone',

@@ -193,9 +193,6 @@ export function GiftTrackerApp({ initialSharedDraft }: GiftTrackerAppProps) {
             <div style={{ fontWeight: 800, fontSize: '16px', letterSpacing: '-0.02em' }}>
               Gift Tracker
             </div>
-            <div style={{ fontSize: '11px', color: 'var(--md-on-surface-variant)' }}>
-              Material You Expressive
-            </div>
           </div>
         </div>
 

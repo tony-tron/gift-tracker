@@ -23,7 +23,7 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: 'Gift Tracker — Material You Expressive',
+  title: 'Gift Tracker',
   description:
     'Personal gift tracking app for Android phones, foldables, and Googlebook with real-time Firebase sync.',
   appleWebApp: {

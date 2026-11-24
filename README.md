@@ -1,12 +1,12 @@
-# Gift Tracker — Material 3 Expressive (Web + Native Android)
+# Gift Tracker (Web + Native Android)
 
-A cross-device Gift Tracking suite built around **Android 16's Material 3 Expressive** design language, **Jetpack Glance Home Screen Widgets**, and real-time **Google Firebase (Cloud Firestore + Auth)** synchronization.
+A cross-device gift tracking suite with **Jetpack Glance Home Screen Widgets** and real-time **Google Firebase (Cloud Firestore + Auth)** synchronization.
 
 ## Repository Structure
 
 ```text
 gift-tracker/
-├── android/                  # Native Android App (Kotlin, Jetpack Compose M3 Expressive 1.5, Glance Widget)
+├── android/                  # Native Android App (Kotlin, Jetpack Compose, Glance Widget)
 ├── web/                      # Next.js 16 Progressive Web App (Desktop, Android, iOS)
 ├── firestore.rules           # Shared Cloud Firestore security rules (UID-scoped)
 ├── firestore.indexes.json    # Shared Cloud Firestore composite indexes
