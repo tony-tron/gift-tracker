@@ -566,8 +566,13 @@ private fun ShareWishlistSheet(
                 ?: ""
         )
     }
-    var webAppUrlInput by remember(prefs.webAppUrl) {
-        mutableStateOf(prefs.webAppUrl.orEmpty())
+    val defaultInferredWeb = remember(prefs.webAppUrl, cloudState.exportableConfig?.projectId) {
+        prefs.webAppUrl?.takeIf { it.isNotBlank() }
+            ?: cloudState.exportableConfig?.projectId?.takeIf { it.isNotBlank() }?.let { "https://$it.web.app" }
+            ?: ""
+    }
+    var webAppUrlInput by remember(defaultInferredWeb) {
+        mutableStateOf(defaultInferredWeb)
     }
     var selectedIds by remember { mutableStateOf(wishes.map { it.id }.toSet()) }
     var includeAllActive by rememberSaveable { mutableStateOf(false) }
@@ -928,7 +933,7 @@ private fun ShareWishlistSheet(
                         value = webAppUrlInput,
                         onValueChange = { webAppUrlInput = it },
                         label = { Text("Hosted Web App URL (required for shareable web URL)") },
-                        placeholder = { Text("https://your-gift-tracker.hosted.app") },
+                        placeholder = { Text("https://gift-tracker-3018d.web.app") },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )

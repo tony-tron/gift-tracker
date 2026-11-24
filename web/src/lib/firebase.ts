@@ -202,10 +202,19 @@ export function decodeFirebasePairingToken(rawInput: string): DecodedPairingPayl
   }
 }
 
+export function getEffectiveOrigin(originOverride?: string): string {
+  if (originOverride?.trim()) return originOverride.replace(/\/+$/, '');
+  if (typeof process !== 'undefined' && process.env.NEXT_PUBLIC_SHARE_BASE_URL?.trim()) {
+    return process.env.NEXT_PUBLIC_SHARE_BASE_URL.trim().replace(/\/+$/, '');
+  }
+  if (typeof window !== 'undefined' && window.location.origin) {
+    return window.location.origin;
+  }
+  return 'https://localhost:3000';
+}
+
 export function buildWebPairingUrl(config: FirebaseClientConfig, originOverride?: string): string {
-  const origin =
-    originOverride?.replace(/\/+$/, '') ||
-    (typeof window !== 'undefined' ? window.location.origin : 'https://localhost:3000');
+  const origin = getEffectiveOrigin(originOverride);
   const token = encodeFirebasePairingToken(config, origin);
   return `${origin}/?pair=${encodeURIComponent(token)}`;
 }
@@ -604,9 +613,7 @@ export function buildSharedWishlistUrl(
   config?: FirebaseClientConfig | null,
   originOverride?: string
 ): string {
-  const origin =
-    originOverride?.replace(/\/+$/, '') ||
-    (typeof window !== 'undefined' ? window.location.origin : 'https://localhost:3000');
+  const origin = getEffectiveOrigin(originOverride);
   const envCfg = getEnvFirebaseConfig();
   const hasMatchingBuildEnv =
     Boolean(envCfg) && (!config || envCfg?.projectId === config.projectId);
