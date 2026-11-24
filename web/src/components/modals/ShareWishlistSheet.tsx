@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import QRCode from 'qrcode';
 import {
   Check,
@@ -32,6 +33,7 @@ interface ShareWishlistSheetProps {
 const OWNER_NAME_PREF_KEY = 'gift_tracker_owner_display_name_v1';
 
 export function ShareWishlistSheet({ wishes, onClose }: ShareWishlistSheetProps) {
+  const router = useRouter();
   const {
     sharedLinks,
     firebaseUser,
@@ -839,8 +841,24 @@ export function ShareWishlistSheet({ wishes, onClose }: ShareWishlistSheetProps)
 
                       <a
                         href={url}
-                        target="_blank"
-                        rel="noopener noreferrer"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          if (typeof window !== 'undefined') {
+                            if (window.location.pathname === '/') {
+                              const params = new URLSearchParams(window.location.search);
+                              if (params.get('tab') !== 'wishlist') {
+                                params.set('tab', 'wishlist');
+                                window.history.replaceState(null, '', `/?${params.toString()}`);
+                              }
+                            }
+                            if (url.startsWith(window.location.origin)) {
+                              const relative = url.slice(window.location.origin.length) || '/';
+                              router.push(relative);
+                              return;
+                            }
+                            window.location.assign(url);
+                          }
+                        }}
                         className="m3-btn-tonal"
                         style={{
                           height: '34px',

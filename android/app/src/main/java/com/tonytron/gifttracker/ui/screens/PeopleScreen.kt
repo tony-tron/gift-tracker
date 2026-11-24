@@ -1,6 +1,7 @@
 package com.tonytron.gifttracker.ui.screens
 
-import androidx.activity.compose.BackHandler
+import androidx.activity.compose.PredictiveBackHandler
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -116,8 +117,17 @@ fun PeopleScreen(
 
     val eventMap = remember(dataset.events) { dataset.events.associateBy { it.id } }
 
-    if (!isTwoPane && mobileDetailOpen) {
-        BackHandler { mobileDetailOpen = false }
+    var backProgress by remember { mutableStateOf(0f) }
+
+    PredictiveBackHandler(enabled = !isTwoPane && mobileDetailOpen) { progress ->
+        try {
+            progress.collect { backEvent ->
+                backProgress = backEvent.progress
+            }
+            mobileDetailOpen = false
+        } finally {
+            backProgress = 0f
+        }
     }
 
     @Composable
@@ -544,7 +554,18 @@ fun PeopleScreen(
         }
     } else {
         if (mobileDetailOpen && activePerson != null) {
-            DetailPane(person = activePerson, modifier = Modifier.fillMaxSize())
+            DetailPane(
+                person = activePerson,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        val scale = 1f - (0.08f * backProgress)
+                        scaleX = scale
+                        scaleY = scale
+                        translationX = backProgress * 48f
+                        alpha = 1f - (0.15f * backProgress)
+                    }
+            )
         } else {
             DirectoryPane(modifier = Modifier.fillMaxSize())
         }

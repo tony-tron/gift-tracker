@@ -1,9 +1,10 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { useParams, useSearchParams } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { onAuthStateChanged } from 'firebase/auth';
 import {
+  ArrowLeft,
   Check,
   ExternalLink,
   EyeOff,
@@ -46,6 +47,7 @@ function getOrCreateClaimerToken(): string {
 
 export function SharedWishlistViewer() {
   const params = useParams<{ shareId: string }>();
+  const router = useRouter();
   const searchParams = useSearchParams();
   const { colorMode, setColorMode } = useGiftStore();
 
@@ -393,6 +395,23 @@ export function SharedWishlistViewer() {
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            {isOwnerPreview && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (typeof window !== 'undefined' && window.history.length > 1) {
+                    router.back();
+                  } else {
+                    router.push('/?tab=wishlist');
+                  }
+                }}
+                className="m3-btn-icon"
+                title="Back to Wishlist"
+                aria-label="Back to Wishlist"
+              >
+                <ArrowLeft size={18} />
+              </button>
+            )}
             <div
               className="m3-avatar"
               data-shape="clover"

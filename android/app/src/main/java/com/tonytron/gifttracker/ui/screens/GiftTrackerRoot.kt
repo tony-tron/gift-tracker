@@ -1,5 +1,6 @@
 package com.tonytron.gifttracker.ui.screens
 
+import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -49,11 +50,14 @@ import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -252,6 +256,19 @@ fun GiftTrackerRoot(
                     }
                 }
             ) { innerPadding ->
+                var tabBackProgress by remember { mutableStateOf(0f) }
+
+                PredictiveBackHandler(enabled = uiState.activeTab != NavTab.EVENTS) { progress ->
+                    try {
+                        progress.collect { backEvent ->
+                            tabBackProgress = backEvent.progress
+                        }
+                        viewModel.setActiveTab(NavTab.EVENTS)
+                    } finally {
+                        tabBackProgress = 0f
+                    }
+                }
+
                 Box(modifier = Modifier.fillMaxSize()) {
                     val bottomClearance = if (isCompact) 112.dp else 24.dp
                     val contentPadding = PaddingValues(
@@ -261,26 +278,39 @@ fun GiftTrackerRoot(
                         end = 16.dp
                     )
 
-                    when (uiState.activeTab) {
-                        NavTab.EVENTS -> EventsScreen(
-                            viewModel = viewModel,
-                            isTwoPane = isExpanded || widthSizeClass == WindowWidthSizeClass.Medium,
-                            contentPadding = contentPadding
-                        )
-                        NavTab.IDEAS -> IdeasScreen(
-                            viewModel = viewModel,
-                            isWide = !isCompact,
-                            contentPadding = contentPadding
-                        )
-                        NavTab.PEOPLE -> PeopleScreen(
-                            viewModel = viewModel,
-                            isTwoPane = !isCompact,
-                            contentPadding = contentPadding
-                        )
-                        NavTab.WISHLIST -> WishlistScreen(
-                            viewModel = viewModel,
-                            contentPadding = contentPadding
-                        )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .graphicsLayer {
+                                if (tabBackProgress > 0f) {
+                                    val scale = 1f - (0.06f * tabBackProgress)
+                                    scaleX = scale
+                                    scaleY = scale
+                                    alpha = 1f - (0.12f * tabBackProgress)
+                                }
+                            }
+                    ) {
+                        when (uiState.activeTab) {
+                            NavTab.EVENTS -> EventsScreen(
+                                viewModel = viewModel,
+                                isTwoPane = isExpanded || widthSizeClass == WindowWidthSizeClass.Medium,
+                                contentPadding = contentPadding
+                            )
+                            NavTab.IDEAS -> IdeasScreen(
+                                viewModel = viewModel,
+                                isWide = !isCompact,
+                                contentPadding = contentPadding
+                            )
+                            NavTab.PEOPLE -> PeopleScreen(
+                                viewModel = viewModel,
+                                isTwoPane = !isCompact,
+                                contentPadding = contentPadding
+                            )
+                            NavTab.WISHLIST -> WishlistScreen(
+                                viewModel = viewModel,
+                                contentPadding = contentPadding
+                            )
+                        }
                     }
 
                     // Compact Phone: Material 3 Expressive HorizontalFloatingToolbar + Vibrant FAB

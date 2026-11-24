@@ -5,6 +5,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
+import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -606,6 +607,22 @@ private fun ShareWishlistSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState
     ) {
+        PredictiveBackHandler(enabled = editingLink != null || qrLinkId != null) { progress ->
+            progress.collect { }
+            when {
+                editingLink != null -> {
+                    editingLink = null
+                    groupTitle = "Family & Friends Wishlist"
+                    selectedIds = wishes.map { it.id }.toSet()
+                    includeAllActive = false
+                    activeTab = "manage"
+                }
+                qrLinkId != null -> {
+                    qrLinkId = null
+                }
+            }
+        }
+
         Column(
             modifier = Modifier
                 .fillMaxWidth()
