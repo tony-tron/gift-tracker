@@ -238,97 +238,84 @@ export function AddToTrackerSheet({
               <Users size={15} /> Who is this gift for?
             </label>
 
-            {matchedPerson ? (
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  background: 'var(--md-surface-container-low)',
-                  padding: '10px 14px',
-                  borderRadius: '12px',
-                  border: '1px solid var(--md-primary)',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <div
-                    className="m3-avatar"
-                    data-shape={matchedPerson.avatarShape}
-                    data-tone={matchedPerson.avatarTone}
-                    style={{ width: '32px', height: '32px', fontSize: '12px' }}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                {people.length > 0 && (
+                  <button
+                    type="button"
+                    className="m3-chip"
+                    data-selected={mode === 'pick-existing'}
+                    onClick={() => setMode('pick-existing')}
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}
                   >
-                    {matchedPerson.name.slice(0, 1)}
-                  </div>
-                  <div>
-                    <strong style={{ fontSize: '14px' }}>{matchedPerson.name}</strong>
-                    <div style={{ fontSize: '11px', color: 'var(--md-on-surface-variant)' }}>
-                      Matched recipient in your tracker
-                    </div>
-                  </div>
-                </div>
+                    <Users size={13} />
+                    {matchedPerson
+                      ? `Existing: ${matchedPerson.name}`
+                      : `Choose from People (${people.length})`}
+                  </button>
+                )}
                 <button
                   type="button"
-                  onClick={() => setMode(mode === 'pick-existing' ? 'unassigned' : 'pick-existing')}
-                  className="m3-btn-text"
-                  style={{ fontSize: '12px', height: '30px' }}
+                  className="m3-chip"
+                  data-selected={mode === 'create-owner'}
+                  onClick={() => setMode('create-owner')}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}
                 >
-                  Change
+                  <UserPlus size={13} /> Create &ldquo;{ownerNameClean}&rdquo;
+                </button>
+                <button
+                  type="button"
+                  className="m3-chip"
+                  data-selected={mode === 'unassigned'}
+                  onClick={() => setMode('unassigned')}
+                >
+                  Idea Pool (Unassigned)
                 </button>
               </div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+
+              {mode === 'pick-existing' && people.length > 0 && (
                 <div
                   style={{
                     display: 'flex',
-                    flexWrap: 'wrap',
+                    flexDirection: 'column',
                     gap: '6px',
+                    background: 'var(--md-surface-container-low)',
+                    padding: '10px 12px',
+                    borderRadius: '12px',
+                    border: '1px solid var(--md-outline-variant)',
                   }}
                 >
-                  <button
-                    type="button"
-                    className="m3-chip"
-                    data-selected={mode === 'create-owner'}
-                    onClick={() => setMode('create-owner')}
-                    style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}
-                  >
-                    <UserPlus size={13} /> Create recipient &ldquo;{ownerNameClean}&rdquo;
-                  </button>
-                  {people.length > 0 && (
-                    <button
-                      type="button"
-                      className="m3-chip"
-                      data-selected={mode === 'pick-existing'}
-                      onClick={() => setMode('pick-existing')}
-                    >
-                      Choose from your People ({people.length})
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    className="m3-chip"
-                    data-selected={mode === 'unassigned'}
-                    onClick={() => setMode('unassigned')}
-                  >
-                    Idea Pool (No person yet)
-                  </button>
-                </div>
-
-                {mode === 'pick-existing' && (
+                  <div style={{ fontSize: '12px', color: 'var(--md-on-surface-variant)' }}>
+                    Track this for an existing person (e.g. if &ldquo;{ownerNameClean}&rdquo; is &ldquo;Mom&rdquo; or a nickname in your tracker):
+                  </div>
                   <select
                     className="m3-select"
                     value={selectedPersonId}
                     onChange={(e) => setSelectedPersonId(e.target.value)}
-                    style={{ marginTop: '4px' }}
                   >
                     {people.map((p) => (
                       <option key={p.id} value={p.id}>
-                        {p.name} ({p.relationship || 'Friend/Family'})
+                        {p.name} {p.relationship ? `(${p.relationship})` : ''}
                       </option>
                     ))}
                   </select>
-                )}
-              </div>
-            )}
+                </div>
+              )}
+
+              {mode === 'create-owner' && (
+                <div
+                  style={{
+                    fontSize: '12px',
+                    color: 'var(--md-on-surface-variant)',
+                    background: 'var(--md-surface-container-low)',
+                    padding: '8px 12px',
+                    borderRadius: '10px',
+                  }}
+                >
+                  Will create a new recipient <strong>&ldquo;{ownerNameClean}&rdquo;</strong> in your People list.
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Occasion / Event Selection */}
