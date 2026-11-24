@@ -179,7 +179,11 @@ data class GiftItem(
     val received: Boolean = false,
     val wrapped: Boolean = false,
     val saveForLater: Boolean = false,
-    val createdAt: String = Instant.now().toString()
+    val createdAt: String = Instant.now().toString(),
+    val sourceWishlistShareId: String? = null,
+    val sourceWishId: String? = null,
+    val sourceWishlistKey: String? = null,
+    val sourceSyncStatus: String? = null
 ) {
     fun displayPrice(): String {
         if (!costLabel.isNullOrBlank()) return costLabel
@@ -187,23 +191,27 @@ data class GiftItem(
         return if (cost % 1.0 == 0.0) "$${cost.toInt()}" else "$%.2f".format(cost)
     }
 
-    fun toFirestoreMap(): Map<String, Any?> = mapOf(
-        "id" to id,
-        "title" to title,
-        "personId" to personId,
-        "eventId" to eventId,
-        "cost" to cost,
-        "costLabel" to costLabel,
-        "store" to store,
-        "url" to url,
-        "tracking" to tracking,
-        "notes" to notes,
-        "bought" to bought,
-        "received" to received,
-        "wrapped" to wrapped,
-        "saveForLater" to saveForLater,
-        "createdAt" to createdAt
-    )
+    fun toFirestoreMap(): Map<String, Any?> = buildMap {
+        put("id", id)
+        put("title", title)
+        put("personId", personId)
+        put("eventId", eventId)
+        put("cost", cost)
+        put("costLabel", costLabel)
+        put("store", store)
+        put("url", url)
+        put("tracking", tracking)
+        put("notes", notes)
+        put("bought", bought)
+        put("received", received)
+        put("wrapped", wrapped)
+        put("saveForLater", saveForLater)
+        put("createdAt", createdAt)
+        if (!sourceWishlistShareId.isNullOrBlank()) put("sourceWishlistShareId", sourceWishlistShareId)
+        if (!sourceWishId.isNullOrBlank()) put("sourceWishId", sourceWishId)
+        if (!sourceWishlistKey.isNullOrBlank()) put("sourceWishlistKey", sourceWishlistKey)
+        if (!sourceSyncStatus.isNullOrBlank()) put("sourceSyncStatus", sourceSyncStatus)
+    }
 
     companion object {
         fun fromFirestoreMap(map: Map<String, Any?>, fallbackId: String): GiftItem = GiftItem(
@@ -221,7 +229,11 @@ data class GiftItem(
             received = (map["received"] as? Boolean) ?: false,
             wrapped = (map["wrapped"] as? Boolean) ?: false,
             saveForLater = (map["saveForLater"] as? Boolean) ?: false,
-            createdAt = (map["createdAt"] as? String) ?: ""
+            createdAt = (map["createdAt"] as? String) ?: "",
+            sourceWishlistShareId = (map["sourceWishlistShareId"] as? String)?.takeIf { it.isNotBlank() },
+            sourceWishId = (map["sourceWishId"] as? String)?.takeIf { it.isNotBlank() },
+            sourceWishlistKey = (map["sourceWishlistKey"] as? String)?.takeIf { it.isNotBlank() },
+            sourceSyncStatus = (map["sourceSyncStatus"] as? String)?.takeIf { it.isNotBlank() }
         )
     }
 }

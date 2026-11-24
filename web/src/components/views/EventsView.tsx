@@ -602,17 +602,47 @@ export function EventsView({ onOpenNewGift, onEditGift }: EventsViewProps) {
                             {gift.title}
                           </h3>
 
-                          {(gift.tracking || gift.notes || gift.url) && (
+                          {(gift.tracking || gift.notes || gift.url || gift.sourceWishlistShareId) && (
                             <div
                               style={{
                                 display: 'flex',
                                 flexWrap: 'wrap',
+                                alignItems: 'center',
                                 gap: '10px',
                                 marginTop: '5px',
                                 fontSize: '12px',
                                 color: 'var(--md-on-surface-variant)',
                               }}
                             >
+                              {gift.sourceWishlistShareId && (
+                                <a
+                                  href={`/w/${gift.sourceWishlistShareId}${
+                                    gift.sourceWishlistKey ? `?k=${gift.sourceWishlistKey}` : ''
+                                  }`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '4px',
+                                    fontSize: '11px',
+                                    fontWeight: 700,
+                                    padding: '2px 8px',
+                                    borderRadius: '99px',
+                                    background: gift.bought
+                                      ? 'var(--md-success-container)'
+                                      : 'var(--md-secondary-container)',
+                                    color: gift.bought
+                                      ? 'var(--md-on-success-container)'
+                                      : 'var(--md-on-secondary-container)',
+                                    textDecoration: 'none',
+                                  }}
+                                  title="Synced with live shared wishlist — toggling Bought syncs live"
+                                >
+                                  <Sparkles size={11} />
+                                  {gift.bought ? 'Wishlist: Purchased ✓' : 'Wishlist: Researching 🔍'}
+                                </a>
+                              )}
                               {gift.url && (
                                 <a
                                   href={gift.url}

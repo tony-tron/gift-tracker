@@ -41,6 +41,8 @@ export interface GiftEvent {
   order: number;
 }
 
+export type ClaimStatus = 'researching' | 'reserved' | 'purchased';
+
 export interface GiftItem {
   id: string;
   title: string;
@@ -57,6 +59,10 @@ export interface GiftItem {
   wrapped: boolean;
   saveForLater: boolean;
   createdAt: string;
+  sourceWishlistShareId?: string;
+  sourceWishId?: string;
+  sourceWishlistKey?: string;
+  sourceSyncStatus?: ClaimStatus;
 }
 
 export interface WishItem {
@@ -107,8 +113,12 @@ export interface SharedWishClaim {
   claimedBy: string;
   claimerToken: string;
   purchased: boolean;
+  status?: ClaimStatus;
+  researchers?: string[];
+  researcherTokens?: string[];
   giverNote?: string;
   claimedAt: string;
+  updatedAt?: string;
 }
 
 export interface GiftDataset {

@@ -25,31 +25,23 @@ import {
 import { useGiftStore } from '@/context/GiftStoreContext';
 import {
   claimPublicWishItem,
+  getOrCreateClaimerToken,
+  getSavedGiverName,
   initPublicViewerServices,
+  setSavedGiverName,
   subscribeToPublicWishlist,
   subscribeToPublicWishlistClaims,
-  unclaimPublicWishItem,
+  unclaimOrStopResearchingPublicWishItem,
   updatePublicWishClaim,
 } from '@/lib/firebase';
-import type { PublicSharedWishlistDoc, SharedWishClaim } from '@/lib/types';
-
-const GIVER_NAME_KEY = 'gift_tracker_giver_name_v1';
-const GIVER_TOKEN_KEY = 'gift_tracker_giver_token_v1';
-
-function getOrCreateClaimerToken(): string {
-  if (typeof window === 'undefined') return 'server';
-  const existing = window.localStorage.getItem(GIVER_TOKEN_KEY);
-  if (existing) return existing;
-  const created = `giver-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-  window.localStorage.setItem(GIVER_TOKEN_KEY, created);
-  return created;
-}
+import type { PublicSharedWishlistDoc, PublishedWishItem, SharedWishClaim } from '@/lib/types';
+import { AddToTrackerSheet } from '@/components/modals/AddToTrackerSheet';
 
 export function SharedWishlistViewer() {
   const params = useParams<{ shareId: string }>();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { colorMode, setColorMode } = useGiftStore();
+  const { colorMode, setColorMode, gifts } = useGiftStore();
 
   const shareId = typeof params?.shareId === 'string' ? params.shareId : '';
   const fallbackKey = searchParams.get('k') || searchParams.get('pair');
@@ -68,12 +60,12 @@ export function SharedWishlistViewer() {
 
   // Giver identity persisted locally in browser
   const [giverName, setGiverName] = useState<string>(() => {
-    if (typeof window === 'undefined') return '';
-    return window.localStorage.getItem(GIVER_NAME_KEY) || '';
+    return getSavedGiverName();
   });
   const [claimerToken] = useState<string>(getOrCreateClaimerToken);
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState('');
+  const [trackerSheetWish, setTrackerSheetWish] = useState<PublishedWishItem | null>(null);
 
   // Pending claim modal when giver hasn't set their name yet
   const [pendingClaimWishId, setPendingClaimWishId] = useState<string | null>(null);
@@ -151,7 +143,15 @@ export function SharedWishlistViewer() {
   const isClaimMine = (claim: SharedWishClaim | undefined): boolean => {
     if (!claim) return false;
     if (claim.claimerToken && claim.claimerToken === claimerToken) return true;
+    if (claim.researcherTokens && claim.researcherTokens.includes(claimerToken)) return true;
     if (giverName.trim() && claim.claimedBy.trim().toLowerCase() === giverName.trim().toLowerCase()) {
+      return true;
+    }
+    if (
+      giverName.trim() &&
+      claim.researchers &&
+      claim.researchers.some((r) => r.trim().toLowerCase() === giverName.trim().toLowerCase())
+    ) {
       return true;
     }
     return false;
@@ -162,8 +162,8 @@ export function SharedWishlistViewer() {
     let mine = 0;
     sortedItems.forEach((item) => {
       const c = claims[item.id];
-      if (!c) available += 1;
-      else if (isClaimMine(c)) mine += 1;
+      if (!c || c.status === 'researching') available += 1;
+      if (isClaimMine(c)) mine += 1;
     });
     return {
       all: sortedItems.length,
@@ -176,7 +176,9 @@ export function SharedWishlistViewer() {
 
   const displayedItems = useMemo(() => {
     if (isOwnerPreview || filter === 'all') return sortedItems;
-    if (filter === 'available') return sortedItems.filter((i) => !claims[i.id]);
+    if (filter === 'available') {
+      return sortedItems.filter((i) => !claims[i.id] || claims[i.id].status === 'researching');
+    }
     return sortedItems.filter((i) => isClaimMine(claims[i.id]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sortedItems, claims, filter, isOwnerPreview, claimerToken, giverName]);
@@ -184,10 +186,7 @@ export function SharedWishlistViewer() {
   const saveGiverName = (nextName: string) => {
     const clean = nextName.trim();
     setGiverName(clean);
-    if (typeof window !== 'undefined') {
-      if (clean) window.localStorage.setItem(GIVER_NAME_KEY, clean);
-      else window.localStorage.removeItem(GIVER_NAME_KEY);
-    }
+    setSavedGiverName(clean);
   };
 
   const executeClaim = async (wishId: string, chosenName: string) => {
@@ -199,6 +198,9 @@ export function SharedWishlistViewer() {
         claimedBy: chosenName.trim(),
         claimerToken,
         purchased: false,
+        status: 'reserved',
+        researchers: [chosenName.trim()],
+        researcherTokens: [claimerToken],
         giverNote: '',
         claimedAt: new Date().toISOString(),
       });
@@ -230,8 +232,9 @@ export function SharedWishlistViewer() {
       const nextPurchased = !claim.purchased;
       await updatePublicWishClaim(services.db, shareId, claim.wishId, claim, {
         purchased: nextPurchased,
+        status: nextPurchased ? 'purchased' : 'researching',
       });
-      showToast(nextPurchased ? 'Marked as Purchased!' : 'Marked as Reserved (not yet bought)');
+      showToast(nextPurchased ? 'Marked as Purchased!' : 'Reverted to Researching (open to others)');
     } finally {
       setBusyWishId(null);
     }
@@ -263,8 +266,8 @@ export function SharedWishlistViewer() {
     }
     setBusyWishId(claim.wishId);
     try {
-      await unclaimPublicWishItem(services.db, shareId, claim.wishId);
-      showToast('Released claim — item is available again.');
+      await unclaimOrStopResearchingPublicWishItem(services.db, shareId, claim.wishId, claimerToken);
+      showToast('Released claim / research — item is available.');
     } finally {
       setBusyWishId(null);
     }
@@ -630,9 +633,13 @@ export function SharedWishlistViewer() {
             displayedItems.map((item) => {
               const claim = isOwnerPreview ? undefined : claims[item.id];
               const mine = isClaimMine(claim);
-              const claimedByOther = Boolean(claim && !mine);
+              const isResearching = claim?.status === 'researching';
+              const claimedByOther = Boolean(claim && !mine && !isResearching);
               const isBusy = busyWishId === item.id;
               const isEditingNote = editingNoteWishId === item.id;
+              const trackedGift = gifts.find(
+                (g) => g.sourceWishlistShareId === shareId && g.sourceWishId === item.id
+              );
 
               return (
                 <div
@@ -681,11 +688,15 @@ export function SharedWishlistViewer() {
                               borderRadius: '99px',
                               background: claim.purchased
                                 ? 'var(--md-success-container)'
+                                : isResearching
+                                ? 'var(--md-secondary-container)'
                                 : mine
                                 ? 'var(--md-primary-container)'
                                 : 'var(--md-surface-container-highest)',
                               color: claim.purchased
                                 ? 'var(--md-on-success-container)'
+                                : isResearching
+                                ? 'var(--md-on-secondary-container)'
                                 : mine
                                 ? 'var(--md-on-primary-container)'
                                 : 'var(--md-on-surface-variant)',
@@ -693,7 +704,28 @@ export function SharedWishlistViewer() {
                           >
                             {claim.purchased
                               ? `✓ Purchased by ${mine ? `you (${claim.claimedBy})` : claim.claimedBy}`
+                              : isResearching
+                              ? `🔍 Researching: ${mine ? `you (${claim.claimedBy})` : claim.claimedBy}`
                               : `Reserved by ${mine ? `you (${claim.claimedBy})` : claim.claimedBy}`}
+                          </span>
+                        )}
+
+                        {trackedGift && (
+                          <span
+                            style={{
+                              fontSize: '11.5px',
+                              fontWeight: 700,
+                              padding: '3px 10px',
+                              borderRadius: '99px',
+                              background: 'var(--md-primary-container)',
+                              color: 'var(--md-on-primary-container)',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                            }}
+                            title="Saved in your Gift Tracker"
+                          >
+                            <Check size={12} strokeWidth={2.8} /> In Your Tracker
                           </span>
                         )}
                       </div>
@@ -762,16 +794,91 @@ export function SharedWishlistViewer() {
                           flexShrink: 0,
                         }}
                       >
+                        {/* Tracker button */}
+                        {!trackedGift ? (
+                          <button
+                            type="button"
+                            disabled={isBusy}
+                            onClick={() => setTrackerSheetWish(item)}
+                            className="m3-btn-tonal"
+                            style={{ height: '36px', fontSize: '12.5px' }}
+                            title="Add to your personal gift tracker & budget"
+                          >
+                            <Sparkles size={14} /> + Track in Gifts
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (trackedGift.eventId) {
+                                router.push(`/?tab=events&event=${trackedGift.eventId}`);
+                              } else {
+                                router.push('/?tab=ideas');
+                              }
+                            }}
+                            className="m3-btn-text"
+                            style={{ height: '34px', fontSize: '11.5px', opacity: 0.85 }}
+                            title="Open in your tracker"
+                          >
+                            View in Tracker ↗
+                          </button>
+                        )}
+
                         {!claim ? (
                           <button
                             type="button"
                             disabled={isBusy}
                             onClick={() => handleTapClaim(item.id)}
                             className="m3-btn-filled"
-                            style={{ height: '38px' }}
+                            style={{ height: '36px', fontSize: '12.5px' }}
                           >
-                            <Check size={15} /> Claim Gift
+                            <Check size={14} /> Claim Gift
                           </button>
+                        ) : isResearching ? (
+                          <>
+                            {mine ? (
+                              <>
+                                <button
+                                  type="button"
+                                  disabled={isBusy}
+                                  onClick={() => handleTapClaim(item.id)}
+                                  className="m3-btn-filled"
+                                  style={{ height: '36px', fontSize: '12.5px' }}
+                                  title="Promote to fully claimed so no one else gets it"
+                                >
+                                  <Check size={14} /> Fully Claim
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={isBusy}
+                                  onClick={() => void handleTogglePurchased(claim)}
+                                  className="m3-btn-tonal"
+                                  style={{ height: '36px', fontSize: '12.5px' }}
+                                >
+                                  <ShoppingBag size={14} /> Mark Bought
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={isBusy}
+                                  onClick={() => void handleUnclaim(claim, true)}
+                                  className="m3-btn-text"
+                                  style={{ height: '36px', fontSize: '12px' }}
+                                >
+                                  <RotateCcw size={13} /> Stop Researching
+                                </button>
+                              </>
+                            ) : (
+                              <button
+                                type="button"
+                                disabled={isBusy}
+                                onClick={() => handleTapClaim(item.id)}
+                                className="m3-btn-filled"
+                                style={{ height: '36px', fontSize: '12.5px' }}
+                              >
+                                <Check size={14} /> Claim Gift
+                              </button>
+                            )}
+                          </>
                         ) : mine ? (
                           <>
                             <button
@@ -936,6 +1043,28 @@ export function SharedWishlistViewer() {
             </div>
           </form>
         </div>
+      )}
+
+      {/* Add To Personal Tracker Bottom Sheet */}
+      {trackerSheetWish && wishlist && (
+        <AddToTrackerSheet
+          open={Boolean(trackerSheetWish)}
+          onClose={() => setTrackerSheetWish(null)}
+          wish={trackerSheetWish}
+          wishlistOwnerName={wishlist.ownerName}
+          shareId={shareId}
+          fallbackKey={fallbackKey}
+          giverName={giverName}
+          onGiverNameChange={saveGiverName}
+          claimerToken={claimerToken}
+          onAddedToTracker={(newGift, status) => {
+            showToast(
+              status === 'reserved'
+                ? `Added "${newGift.title}" to tracker & reserved on wishlist!`
+                : `Added "${newGift.title}" to tracker as researching!`
+            );
+          }}
+        />
       )}
 
       {/* Toast Notification */}

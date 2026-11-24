@@ -309,6 +309,36 @@ export function IdeasView({
                       alignItems: 'center',
                     }}
                   >
+                    {idea.sourceWishlistShareId && (
+                      <a
+                        href={`/w/${idea.sourceWishlistShareId}${
+                          idea.sourceWishlistKey ? `?k=${idea.sourceWishlistKey}` : ''
+                        }`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                          fontSize: '11px',
+                          fontWeight: 700,
+                          padding: '2px 8px',
+                          borderRadius: '99px',
+                          background: idea.bought
+                            ? 'var(--md-success-container)'
+                            : 'var(--md-secondary-container)',
+                          color: idea.bought
+                            ? 'var(--md-on-success-container)'
+                            : 'var(--md-on-secondary-container)',
+                          textDecoration: 'none',
+                        }}
+                        title="Synced with live shared wishlist"
+                      >
+                        <Sparkles size={11} />
+                        {idea.bought ? 'Wishlist: Purchased ✓' : 'Wishlist: Researching 🔍'}
+                      </a>
+                    )}
+
                     {idea.saveForLater && (
                       <span
                         style={{

@@ -27,6 +27,7 @@ import {
   type Unsubscribe,
 } from 'firebase/firestore';
 import type {
+  ClaimStatus,
   FirebaseClientConfig,
   GiftDataset,
   GiftEvent,
@@ -746,6 +747,30 @@ export function subscribeToPublicWishlist(
   );
 }
 
+export const GIVER_NAME_KEY = 'gift_tracker_giver_name_v1';
+export const GIVER_TOKEN_KEY = 'gift_tracker_giver_token_v1';
+
+export function getOrCreateClaimerToken(): string {
+  if (typeof window === 'undefined') return 'server';
+  const existing = window.localStorage.getItem(GIVER_TOKEN_KEY);
+  if (existing) return existing;
+  const created = `giver-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  window.localStorage.setItem(GIVER_TOKEN_KEY, created);
+  return created;
+}
+
+export function getSavedGiverName(): string {
+  if (typeof window === 'undefined') return '';
+  return window.localStorage.getItem(GIVER_NAME_KEY) || '';
+}
+
+export function setSavedGiverName(name: string): void {
+  if (typeof window === 'undefined') return;
+  const clean = name.trim();
+  if (clean) window.localStorage.setItem(GIVER_NAME_KEY, clean);
+  else window.localStorage.removeItem(GIVER_NAME_KEY);
+}
+
 export function subscribeToPublicWishlistClaims(
   db: Firestore,
   shareId: string,
@@ -776,17 +801,94 @@ export async function claimPublicWishItem(
     const existing = await tx.get(claimRef);
     if (existing.exists()) {
       const data = existing.data() as Partial<SharedWishClaim>;
-      if (data.claimerToken !== claim.claimerToken) {
+      if (
+        data.status !== 'researching' &&
+        data.claimerToken &&
+        data.claimerToken !== claim.claimerToken
+      ) {
         return { ok: false as const, claimedBy: data.claimedBy || 'Someone else' };
       }
     }
+    const cleanStatus = claim.status || (claim.purchased ? 'purchased' : 'reserved');
     tx.set(claimRef, {
       wishId: claim.wishId,
       claimedBy: claim.claimedBy.trim().slice(0, 80),
       claimerToken: claim.claimerToken,
       purchased: Boolean(claim.purchased),
+      status: cleanStatus,
+      researchers: claim.researchers || [claim.claimedBy.trim()],
+      researcherTokens: claim.researcherTokens || [claim.claimerToken],
       giverNote: (claim.giverNote || '').trim(),
-      claimedAt: claim.claimedAt,
+      claimedAt: claim.claimedAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    return { ok: true as const };
+  });
+}
+
+export async function setWishResearching(
+  db: Firestore,
+  shareId: string,
+  wishId: string,
+  researcherName: string,
+  researcherToken: string
+): Promise<{ ok: true } | { ok: false; claimedBy: string }> {
+  const claimRef = doc(db, 'shared_wishlists', shareId, 'claims', wishId);
+  return runTransaction(db, async (tx) => {
+    const existing = await tx.get(claimRef);
+    if (existing.exists()) {
+      const data = existing.data() as Partial<SharedWishClaim>;
+      if (data.status === 'reserved' || data.status === 'purchased' || data.purchased) {
+        if (data.claimerToken !== researcherToken) {
+          return { ok: false as const, claimedBy: data.claimedBy || 'Someone else' };
+        }
+      }
+      const existingResearchers =
+        data.researchers && Array.isArray(data.researchers)
+          ? data.researchers
+          : [data.claimedBy || researcherName];
+      const existingTokens =
+        data.researcherTokens && Array.isArray(data.researcherTokens)
+          ? data.researcherTokens
+          : [data.claimerToken || researcherToken];
+
+      const cleanName = researcherName.trim().slice(0, 40);
+      const nextResearchers = existingResearchers.includes(cleanName)
+        ? existingResearchers
+        : [...existingResearchers, cleanName];
+      const nextTokens = existingTokens.includes(researcherToken)
+        ? existingTokens
+        : [...existingTokens, researcherToken];
+
+      const joinedNames = nextResearchers.join(', ').slice(0, 80);
+
+      tx.set(claimRef, {
+        wishId,
+        claimedBy: joinedNames || cleanName,
+        claimerToken: researcherToken,
+        purchased: false,
+        status: 'researching',
+        researchers: nextResearchers,
+        researcherTokens: nextTokens,
+        giverNote: (data.giverNote || '').trim(),
+        claimedAt: data.claimedAt || new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+      return { ok: true as const };
+    }
+
+    const cleanName = researcherName.trim().slice(0, 80);
+    tx.set(claimRef, {
+      wishId,
+      claimedBy: cleanName,
+      claimerToken: researcherToken,
+      purchased: false,
+      status: 'researching',
+      researchers: [cleanName],
+      researcherTokens: [researcherToken],
+      giverNote: '',
+      claimedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
     });
     return { ok: true as const };
   });
@@ -797,16 +899,28 @@ export async function updatePublicWishClaim(
   shareId: string,
   wishId: string,
   existing: SharedWishClaim,
-  patch: Partial<Pick<SharedWishClaim, 'purchased' | 'giverNote' | 'claimedBy'>>
+  patch: Partial<Pick<SharedWishClaim, 'purchased' | 'giverNote' | 'claimedBy' | 'status'>>
 ): Promise<void> {
   const claimRef = doc(db, 'shared_wishlists', shareId, 'claims', wishId);
+  const nextPurchased = patch.purchased !== undefined ? patch.purchased : existing.purchased;
+  const nextStatus =
+    patch.status !== undefined
+      ? patch.status
+      : nextPurchased
+      ? 'purchased'
+      : existing.status || 'reserved';
+
   const merged = {
     wishId,
     claimedBy: (patch.claimedBy ?? existing.claimedBy).trim().slice(0, 80),
     claimerToken: existing.claimerToken,
-    purchased: patch.purchased !== undefined ? patch.purchased : existing.purchased,
+    purchased: nextPurchased,
+    status: nextStatus,
+    researchers: existing.researchers || [existing.claimedBy],
+    researcherTokens: existing.researcherTokens || [existing.claimerToken],
     giverNote: patch.giverNote !== undefined ? patch.giverNote.trim() : existing.giverNote || '',
     claimedAt: existing.claimedAt,
+    updatedAt: new Date().toISOString(),
   };
   await setDoc(claimRef, merged);
 }
@@ -817,4 +931,121 @@ export async function unclaimPublicWishItem(
   wishId: string
 ): Promise<void> {
   await deleteDoc(doc(db, 'shared_wishlists', shareId, 'claims', wishId));
+}
+
+export async function unclaimOrStopResearchingPublicWishItem(
+  db: Firestore,
+  shareId: string,
+  wishId: string,
+  claimerToken: string
+): Promise<void> {
+  const claimRef = doc(db, 'shared_wishlists', shareId, 'claims', wishId);
+  await runTransaction(db, async (tx) => {
+    const existing = await tx.get(claimRef);
+    if (!existing.exists()) return;
+    const data = existing.data() as Partial<SharedWishClaim>;
+
+    if (data.status === 'researching') {
+      const remainingResearchers = (data.researchers || []).filter(
+        (_, i) => (data.researcherTokens || [])[i] !== claimerToken
+      );
+      const remainingTokens = (data.researcherTokens || []).filter((t) => t !== claimerToken);
+
+      if (remainingResearchers.length === 0) {
+        tx.delete(claimRef);
+      } else {
+        tx.set(claimRef, {
+          ...data,
+          claimedBy: remainingResearchers.join(', ').slice(0, 80),
+          claimerToken: remainingTokens[0] || 'unknown',
+          researchers: remainingResearchers,
+          researcherTokens: remainingTokens,
+          updatedAt: new Date().toISOString(),
+        });
+      }
+      return;
+    }
+
+    tx.delete(claimRef);
+  });
+}
+
+export async function syncGiftBoughtStatusToWishlist(params: {
+  shareId: string;
+  wishId: string;
+  bought: boolean;
+  giverName: string;
+  claimerToken: string;
+  projectKey?: string;
+}): Promise<{ ok: boolean; message?: string }> {
+  const services = initPublicViewerServices(params.projectKey);
+  if (!services) {
+    return { ok: false, message: 'Could not connect to shared wishlist database' };
+  }
+
+  const cleanName = (params.giverName || 'A Gift Giver').trim().slice(0, 80);
+  const claimRef = doc(services.db, 'shared_wishlists', params.shareId, 'claims', params.wishId);
+
+  try {
+    return await runTransaction(services.db, async (tx) => {
+      const snap = await tx.get(claimRef);
+      const existing = snap.exists() ? (snap.data() as Partial<SharedWishClaim>) : null;
+
+      if (params.bought) {
+        if (
+          existing &&
+          existing.status !== 'researching' &&
+          existing.claimerToken &&
+          existing.claimerToken !== params.claimerToken
+        ) {
+          return {
+            ok: false,
+            message: `Conflict: Already claimed by ${existing.claimedBy || 'someone else'} on the wishlist.`,
+          };
+        }
+
+        tx.set(claimRef, {
+          wishId: params.wishId,
+          claimedBy: cleanName,
+          claimerToken: params.claimerToken,
+          purchased: true,
+          status: 'purchased' as ClaimStatus,
+          researchers: existing?.researchers || [cleanName],
+          researcherTokens: existing?.researcherTokens || [params.claimerToken],
+          giverNote: (existing?.giverNote || '').trim(),
+          claimedAt: existing?.claimedAt || new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        });
+
+        return { ok: true, message: 'Marked as Purchased on the wishlist!' };
+      } else {
+        if (
+          existing &&
+          existing.status !== 'researching' &&
+          existing.claimerToken &&
+          existing.claimerToken !== params.claimerToken
+        ) {
+          return { ok: false, message: 'Claim belongs to another user.' };
+        }
+
+        tx.set(claimRef, {
+          wishId: params.wishId,
+          claimedBy: cleanName,
+          claimerToken: params.claimerToken,
+          purchased: false,
+          status: 'researching' as ClaimStatus,
+          researchers: [cleanName],
+          researcherTokens: [params.claimerToken],
+          giverNote: (existing?.giverNote || '').trim(),
+          claimedAt: existing?.claimedAt || new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        });
+
+        return { ok: true, message: 'Reverted to Researching on the wishlist.' };
+      }
+    });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : 'Failed to update wishlist claim';
+    return { ok: false, message: msg };
+  }
 }

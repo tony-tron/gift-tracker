@@ -19,8 +19,11 @@ import {
   deleteRemoteDoc,
   encodeFirebasePairingToken,
   generateShareId,
+  getOrCreateClaimerToken,
   getSavedFirebaseConfig,
+  getSavedGiverName,
   initFirebaseServices,
+  initPublicViewerServices,
   observeAuth,
   publishSharedWishlistDoc,
   saveRuntimeFirebaseConfig,
@@ -29,6 +32,8 @@ import {
   signOutFirebase,
   subscribeToWorkspace,
   syncAllSharedWishlistsForOwner,
+  syncGiftBoughtStatusToWishlist,
+  unclaimOrStopResearchingPublicWishItem,
   uploadFullDatasetToFirestore,
   upsertRemoteDoc,
 } from '@/lib/firebase';
@@ -529,6 +534,17 @@ export function GiftStoreProvider({ children }: { children: React.ReactNode }) {
       if (firebaseUser) {
         void deleteRemoteDoc('gifts', id, firebaseUser.uid);
       }
+      if (target?.sourceWishlistShareId && target?.sourceWishId) {
+        const services = initPublicViewerServices(target.sourceWishlistKey);
+        if (services) {
+          void unclaimOrStopResearchingPublicWishItem(
+            services.db,
+            target.sourceWishlistShareId,
+            target.sourceWishId,
+            getOrCreateClaimerToken()
+          );
+        }
+      }
       if (target) {
         showSnackbar(`Removed "${target.title}"`, 'Undo', () => {
           setDataset((prev) => ({ ...prev, gifts: [target, ...prev.gifts] }));
@@ -543,6 +559,26 @@ export function GiftStoreProvider({ children }: { children: React.ReactNode }) {
 
   const toggleGiftStatus = useCallback(
     (id: string, field: 'bought' | 'received' | 'wrapped') => {
+      const targetGift = datasetRef.current.gifts.find((g) => g.id === id);
+      if (targetGift && (field === 'bought' || field === 'received' || field === 'wrapped')) {
+        const nextVal = !targetGift[field];
+        const nextBought = field === 'bought' ? nextVal : true;
+        if (targetGift.sourceWishlistShareId && targetGift.sourceWishId) {
+          void syncGiftBoughtStatusToWishlist({
+            shareId: targetGift.sourceWishlistShareId,
+            wishId: targetGift.sourceWishId,
+            bought: nextBought,
+            giverName: getSavedGiverName() || firebaseUser?.displayName || 'Gift Giver',
+            claimerToken: getOrCreateClaimerToken(),
+            projectKey: targetGift.sourceWishlistKey,
+          }).then((res) => {
+            if (res.message) {
+              showSnackbar(res.message);
+            }
+          });
+        }
+      }
+
       setDataset((prev) => {
         const nextGifts = prev.gifts.map((g) => {
           if (g.id !== id) return g;
@@ -555,6 +591,10 @@ export function GiftStoreProvider({ children }: { children: React.ReactNode }) {
             patch.received = false;
             patch.wrapped = false;
           }
+          if (g.sourceWishlistShareId && g.sourceWishId) {
+            const effectiveBought = field === 'bought' ? nextVal : (patch.bought ?? g.bought);
+            patch.sourceSyncStatus = effectiveBought ? 'purchased' : 'researching';
+          }
           const updated = { ...g, ...patch };
           if (firebaseUser) {
             void upsertRemoteDoc('gifts', id, updated, firebaseUser.uid);
@@ -564,7 +604,7 @@ export function GiftStoreProvider({ children }: { children: React.ReactNode }) {
         return { ...prev, gifts: nextGifts };
       });
     },
-    [firebaseUser]
+    [firebaseUser, showSnackbar]
   );
 
   const moveGiftToEvent = useCallback(
