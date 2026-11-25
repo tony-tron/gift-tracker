@@ -146,40 +146,47 @@ class FirebaseSyncManager(private val appContext: Context) {
                 request = request,
                 context = activityContext
             )
-        } catch (e: androidx.credentials.exceptions.GetCredentialCancellationException) {
-            val sha1 = getAppSigningSha1(activityContext)
-            val shaHint = if (sha1 != null) " (Installed APK SHA-1: $sha1)" else ""
-            val details = buildString {
-                appendLine("Exception: ${e::class.java.name}")
-                appendLine("Type: ${e.type}")
-                appendLine("ErrorMessage: ${e.errorMessage}")
-                appendLine("Message: ${e.message}")
-                appendLine("Cause: ${e.cause?.let { "${it::class.java.name}: ${it.message}" } ?: "none"}")
-                appendLine("Package: ${activityContext.packageName}")
-                appendLine("Installed SHA-1: ${sha1 ?: "unknown"}")
-                appendLine("Firebase AppId: ${app.options.applicationId}")
-                append("WebClientId: $trimmedClientId")
+        } catch (primaryErr: androidx.credentials.exceptions.GetCredentialCancellationException) {
+            val isReauthFailure = primaryErr.errorMessage?.toString()?.contains("reauth", ignoreCase = true) == true
+            if (isReauthFailure) {
+                val googleIdOption = GetGoogleIdOption.Builder()
+                    .setFilterByAuthorizedAccounts(false)
+                    .setServerClientId(trimmedClientId)
+                    .setAutoSelectEnabled(false)
+                    .build()
+                val fallbackRequest = GetCredentialRequest.Builder()
+                    .addCredentialOption(googleIdOption)
+                    .build()
+                try {
+                    credentialManager.getCredential(
+                        request = fallbackRequest,
+                        context = activityContext
+                    )
+                } catch (fallbackErr: androidx.credentials.exceptions.GetCredentialException) {
+                    throw buildSignInDiagnosticException(
+                        activityContext = activityContext,
+                        app = app,
+                        trimmedClientId = trimmedClientId,
+                        primaryErr = primaryErr,
+                        fallbackErr = fallbackErr
+                    )
+                }
+            } else {
+                throw buildSignInDiagnosticException(
+                    activityContext = activityContext,
+                    app = app,
+                    trimmedClientId = trimmedClientId,
+                    primaryErr = primaryErr,
+                    fallbackErr = null
+                )
             }
-            throw IllegalStateException(
-                "Sign-in canceled or rejected by Google Play Services. If you selected an account, verify your Firebase SHA-1 & OAuth consent screen$shaHint.\n\n[Details]\n$details",
-                e
-            )
         } catch (e: androidx.credentials.exceptions.GetCredentialException) {
-            val sha1 = getAppSigningSha1(activityContext)
-            val details = buildString {
-                appendLine("Exception: ${e::class.java.name}")
-                appendLine("Type: ${e.type}")
-                appendLine("ErrorMessage: ${e.errorMessage}")
-                appendLine("Message: ${e.message}")
-                appendLine("Cause: ${e.cause?.let { "${it::class.java.name}: ${it.message}" } ?: "none"}")
-                appendLine("Package: ${activityContext.packageName}")
-                appendLine("Installed SHA-1: ${sha1 ?: "unknown"}")
-                appendLine("Firebase AppId: ${app.options.applicationId}")
-                append("WebClientId: $trimmedClientId")
-            }
-            throw IllegalStateException(
-                "${e.type}: ${e.errorMessage ?: e.localizedMessage}\n\n[Details]\n$details",
-                e
+            throw buildSignInDiagnosticException(
+                activityContext = activityContext,
+                app = app,
+                trimmedClientId = trimmedClientId,
+                primaryErr = e,
+                fallbackErr = null
             )
         }
 
@@ -194,6 +201,37 @@ class FirebaseSyncManager(private val appContext: Context) {
         } else {
             error("Unexpected credential type returned by Credential Manager: ${credential::class.java.simpleName}")
         }
+    }
+
+    private fun buildSignInDiagnosticException(
+        activityContext: Context,
+        app: FirebaseApp,
+        trimmedClientId: String,
+        primaryErr: androidx.credentials.exceptions.GetCredentialException,
+        fallbackErr: androidx.credentials.exceptions.GetCredentialException?
+    ): IllegalStateException {
+        val sha1 = getAppSigningSha1(activityContext)
+        val shaHint = if (sha1 != null) " (Installed APK SHA-1: $sha1)" else ""
+        val details = buildString {
+            appendLine("Primary Type: ${primaryErr.type}")
+            appendLine("Primary ErrorMessage: ${primaryErr.errorMessage}")
+            appendLine("Primary Cause: ${primaryErr.cause?.let { "${it::class.java.name}: ${it.message}" } ?: "none"}")
+            if (fallbackErr != null) {
+                appendLine("Fallback Type: ${fallbackErr.type}")
+                appendLine("Fallback ErrorMessage: ${fallbackErr.errorMessage}")
+                appendLine("Fallback Cause: ${fallbackErr.cause?.let { "${it::class.java.name}: ${it.message}" } ?: "none"}")
+            }
+            appendLine("Package: ${activityContext.packageName}")
+            appendLine("Installed SHA-1: ${sha1 ?: "unknown"}")
+            appendLine("Firebase AppId: ${app.options.applicationId}")
+            append("WebClientId: $trimmedClientId")
+        }
+        val summary = if (primaryErr is androidx.credentials.exceptions.GetCredentialCancellationException) {
+            "Sign-in canceled or rejected by Google Play Services. If you selected an account, verify your Firebase SHA-1 & OAuth consent screen$shaHint."
+        } else {
+            "${primaryErr.type}: ${primaryErr.errorMessage ?: primaryErr.localizedMessage}"
+        }
+        return IllegalStateException("$summary\n\n[Details]\n$details", fallbackErr ?: primaryErr)
     }
 
     suspend fun signInAnonymously(app: FirebaseApp): FirebaseUser {
