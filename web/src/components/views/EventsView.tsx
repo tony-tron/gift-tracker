@@ -3,6 +3,7 @@
 import React, { useMemo, useState } from 'react';
 import {
   Archive,
+  ArchiveRestore,
   Bookmark,
   CalendarPlus,
   Check,
@@ -34,6 +35,7 @@ export function EventsView({ onOpenNewGift, onEditGift }: EventsViewProps) {
     moveGiftToIdeas,
     moveGiftToEvent,
     addEvent,
+    updateEvent,
     setActiveTab,
     setSelectedPersonId,
   } = useGiftStore();
@@ -43,7 +45,7 @@ export function EventsView({ onOpenNewGift, onEditGift }: EventsViewProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [showArchivedEvents, setShowArchivedEvents] = useState(false);
   const [creatingEvent, setCreatingEvent] = useState(false);
-  const [newYear, setNewYear] = useState(2026);
+  const [newYear, setNewYear] = useState(() => new Date().getFullYear());
   const [newOccasion, setNewOccasion] = useState<OccasionType>('Christmas');
   const [newCustomTitle, setNewCustomTitle] = useState('');
 
@@ -55,20 +57,20 @@ export function EventsView({ onOpenNewGift, onEditGift }: EventsViewProps) {
   const activeEvents = useMemo(() => events.filter((e) => !e.isArchived), [events]);
   const archivedEvents = useMemo(() => events.filter((e) => e.isArchived), [events]);
 
-  // Support unified "All 2026" view ('year:2026') OR individual event ID
-  const isYear2026Mode = selectedEventId === 'year:2026';
+  // Support unified "All Active" view ('all:active' / legacy 'year:2026') OR individual event ID
+  const isAllActiveMode = selectedEventId === 'all:active' || selectedEventId === 'year:2026';
   const currentEvent = useMemo(
     () => events.find((e) => e.id === selectedEventId) || events[0],
     [events, selectedEventId]
   );
 
   const eventGifts = useMemo(() => {
-    if (isYear2026Mode) {
-      const ids2026 = new Set(events.filter((e) => e.year === 2026).map((e) => e.id));
-      return gifts.filter((g) => g.eventId && ids2026.has(g.eventId));
+    if (isAllActiveMode) {
+      const activeIds = new Set(activeEvents.map((e) => e.id));
+      return gifts.filter((g) => g.eventId && activeIds.has(g.eventId));
     }
     return gifts.filter((g) => g.eventId === selectedEventId);
-  }, [gifts, events, selectedEventId, isYear2026Mode]);
+  }, [gifts, activeEvents, selectedEventId, isAllActiveMode]);
 
   const filteredGifts = useMemo(() => {
     return eventGifts.filter((g) => {
@@ -131,7 +133,7 @@ export function EventsView({ onOpenNewGift, onEditGift }: EventsViewProps) {
   // Suggestions from Ideas Backlog for people who haven't hit budget yet
   const suggestedIdeas = useMemo(() => {
     const targetEvId = isYear2026Mode ? '2026-christmas' : selectedEventId;
-    if (currentEvent?.isArchived && !isYear2026Mode) return [];
+    if (currentEvent?.isArchived && !isAllActiveMode) return [];
     return gifts
       .filter((g) => g.eventId === null && g.personId)
       .slice(0, 5)
@@ -193,24 +195,24 @@ export function EventsView({ onOpenNewGift, onEditGift }: EventsViewProps) {
           <button
             type="button"
             className="m3-chip"
-            data-selected={isYear2026Mode}
+            data-selected={isAllActiveMode}
             onClick={() => {
-              setSelectedEventId('year:2026');
+              setSelectedEventId('all:active');
               setPersonFilter('all');
             }}
           >
             <span>🗓️</span>
-            <span>All 2026 Combined</span>
+            <span>All Active</span>
           </button>
 
           <button
             type="button"
             className="m3-chip"
-            data-selected={showArchivedEvents || Boolean(currentEvent?.isArchived && !isYear2026Mode)}
+            data-selected={showArchivedEvents || Boolean(currentEvent?.isArchived && !isAllActiveMode)}
             onClick={() => setShowArchivedEvents((v) => !v)}
           >
             <Archive size={14} />
-            <span>Past Years (2023–2025)</span>
+            <span>Archived</span>
           </button>
 
           <button
@@ -224,8 +226,8 @@ export function EventsView({ onOpenNewGift, onEditGift }: EventsViewProps) {
           </button>
         </div>
 
-        {/* Past Archived Years Drawer */}
-        {(showArchivedEvents || (currentEvent?.isArchived && !isYear2026Mode)) && (
+        {/* Archived Occasions Drawer */}
+        {(showArchivedEvents || (currentEvent?.isArchived && !isAllActiveMode)) && (
           <div className="m3-chip-row" style={{ paddingLeft: '4px' }}>
             {archivedEvents.map((ev) => (
               <button
@@ -323,10 +325,10 @@ export function EventsView({ onOpenNewGift, onEditGift }: EventsViewProps) {
                     letterSpacing: '0.06em',
                   }}
                 >
-                  {isYear2026Mode
-                    ? '2026 Combined Occasions'
+                  {isAllActiveMode
+                    ? 'All Active Occasions'
                     : currentEvent?.isArchived
-                    ? 'Historical Archive'
+                    ? 'Archived'
                     : 'Active Occasion'}
                 </span>
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', marginTop: '2px' }}>
@@ -341,18 +343,43 @@ export function EventsView({ onOpenNewGift, onEditGift }: EventsViewProps) {
                 </div>
               </div>
 
-              <button
-                type="button"
-                onClick={() =>
-                  onOpenNewGift({
-                    eventId: isYear2026Mode ? '2026-christmas' : currentEvent?.id || '2026-christmas',
-                    personId: personFilter !== 'all' && personFilter !== 'unassigned' ? personFilter : null,
-                  })
-                }
-                className="m3-btn-filled"
-              >
-                <Plus size={16} /> Add Gift Here
-              </button>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
+                {!isAllActiveMode && currentEvent && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      updateEvent(currentEvent.id, { isArchived: !currentEvent.isArchived })
+                    }
+                    className="m3-btn-tonal"
+                    title={currentEvent.isArchived ? 'Restore to active occasions' : 'Move to Archived'}
+                  >
+                    {currentEvent.isArchived ? (
+                      <>
+                        <ArchiveRestore size={16} /> Unarchive
+                      </>
+                    ) : (
+                      <>
+                        <Archive size={16} /> Archive
+                      </>
+                    )}
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    onOpenNewGift({
+                      eventId: isAllActiveMode
+                        ? activeEvents[0]?.id || '2026-christmas'
+                        : currentEvent?.id || activeEvents[0]?.id || '2026-christmas',
+                      personId: personFilter !== 'all' && personFilter !== 'unassigned' ? personFilter : null,
+                    })
+                  }
+                  className="m3-btn-filled"
+                >
+                  <Plus size={16} /> Add Gift Here
+                </button>
+              </div>
             </div>
 
             <ExpressiveProgress

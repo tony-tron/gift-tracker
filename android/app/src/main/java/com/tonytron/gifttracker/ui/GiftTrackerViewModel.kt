@@ -84,7 +84,9 @@ class GiftTrackerViewModel(application: Application) : AndroidViewModel(applicat
     fun openNewGiftComposer(personId: String? = null, eventId: String? = null) {
         val resolvedEvent = eventId ?: if (_uiState.value.activeTab == NavTab.EVENTS) {
             val sel = preferences.value.selectedEventId
-            if (sel == "year:2026") "2026-christmas" else sel
+            if (sel == "all:active" || sel == "year:2026") {
+                repository.dataset.value.events.firstOrNull { !it.isArchived }?.id
+            } else sel
         } else {
             null
         }
@@ -124,7 +126,9 @@ class GiftTrackerViewModel(application: Application) : AndroidViewModel(applicat
 
     fun openQuickAddFromWidget() {
         val sel = preferences.value.selectedEventId
-        val targetEvent = if (sel == "year:2026") "2026-christmas" else sel
+        val targetEvent = if (sel == "all:active" || sel == "year:2026") {
+            repository.dataset.value.events.firstOrNull { !it.isArchived }?.id
+        } else sel
         _uiState.update {
             it.copy(
                 activeTab = NavTab.EVENTS,
@@ -257,6 +261,12 @@ class GiftTrackerViewModel(application: Application) : AndroidViewModel(applicat
         val created = repository.addEvent(name, year, occasion, emoji)
         selectEvent(created.id)
         showMessage("Created ${created.emoji} ${created.name}")
+    }
+
+    fun setEventArchived(eventId: String, archived: Boolean) {
+        val updated = repository.setEventArchived(eventId, archived) ?: return
+        val actionLabel = if (archived) "Archived" else "Restored"
+        showMessage("$actionLabel ${updated.emoji} ${updated.name}")
     }
 
     fun addWish(title: String, url: String, notes: String = "") {

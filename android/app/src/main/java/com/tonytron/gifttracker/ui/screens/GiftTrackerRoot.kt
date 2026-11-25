@@ -108,9 +108,10 @@ fun GiftTrackerRoot(
         }
     }
 
-    val eventGiftsCount = remember(dataset.gifts, prefs.selectedEventId) {
-        if (prefs.selectedEventId == "year:2026") {
-            dataset.gifts.count { it.eventId?.startsWith("2026-") == true }
+    val eventGiftsCount = remember(dataset.gifts, dataset.events, prefs.selectedEventId) {
+        if (prefs.selectedEventId == "all:active" || prefs.selectedEventId == "year:2026") {
+            val activeIds = dataset.events.filter { !it.isArchived }.map { it.id }.toSet()
+            dataset.gifts.count { it.eventId != null && it.eventId in activeIds }
         } else {
             dataset.gifts.count { it.eventId == prefs.selectedEventId }
         }
@@ -127,7 +128,7 @@ fun GiftTrackerRoot(
 
     val heading = when (uiState.activeTab) {
         NavTab.EVENTS -> {
-            if (prefs.selectedEventId == "year:2026") "2026 Occasions"
+            if (prefs.selectedEventId == "all:active" || prefs.selectedEventId == "year:2026") "All Active Occasions"
             else dataset.events.firstOrNull { it.id == prefs.selectedEventId }?.name ?: "Occasions"
         }
         NavTab.IDEAS -> "Gift Ideas & Stash"

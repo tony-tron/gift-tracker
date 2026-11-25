@@ -407,6 +407,22 @@ class GiftRepository(private val appContext: Context) {
         return ev
     }
 
+    fun setEventArchived(eventId: String, archived: Boolean): GiftEvent? {
+        var target: GiftEvent? = null
+        val nextEvents = _dataset.value.events.map { ev ->
+            if (ev.id == eventId) {
+                ev.copy(isArchived = archived).also { target = it }
+            } else {
+                ev
+            }
+        }
+        val updatedEvent = target ?: return null
+        val updated = _dataset.value.copy(events = nextEvents)
+        persistAndRefreshWidget(updated)
+        syncUpsert("events", updatedEvent.id, updatedEvent.toFirestoreMap())
+        return updatedEvent
+    }
+
     // --- Wishes & Live Shared Wishlist Links CRUD ---
 
     fun addWish(title: String, url: String, priority: String = "medium", notes: String = ""): WishItem {

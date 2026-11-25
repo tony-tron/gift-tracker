@@ -3,10 +3,11 @@ package com.tonytron.gifttracker.ui.sheets
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -44,6 +45,7 @@ import com.tonytron.gifttracker.ui.GiftTrackerViewModel
 import com.tonytron.gifttracker.ui.components.ExpressiveAvatar
 import com.tonytron.gifttracker.ui.components.avatarToneColors
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun PersonEditorSheet(
     editingPerson: Person?,
@@ -161,11 +163,10 @@ fun PersonEditorSheet(
 
             // MaterialShapes Avatar Picker
             Text("Material 3 Expressive Avatar Shape & Tone", style = MaterialTheme.typography.labelLarge)
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 IdGenerator.AVATAR_SHAPES.forEach { shape ->
                     FilterChip(

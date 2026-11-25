@@ -91,10 +91,13 @@ export function GiftTrackerApp({ initialSharedDraft }: GiftTrackerAppProps) {
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   const counts = useMemo(() => {
-    const activeEventGifts =
-      selectedEventId === 'year:2026'
-        ? gifts.filter((g) => g.eventId?.startsWith('2026-')).length
-        : gifts.filter((g) => g.eventId === selectedEventId).length;
+    const isAllActive = selectedEventId === 'all:active' || selectedEventId === 'year:2026';
+    const activeEventGifts = isAllActive
+      ? (() => {
+          const activeIds = new Set(events.filter((e) => !e.isArchived).map((e) => e.id));
+          return gifts.filter((g) => g.eventId && activeIds.has(g.eventId)).length;
+        })()
+      : gifts.filter((g) => g.eventId === selectedEventId).length;
     const ideasCount = gifts.filter((g) => g.eventId === null).length;
     const wantedCount = wishes.filter((w) => !w.received).length;
     return {
@@ -103,11 +106,13 @@ export function GiftTrackerApp({ initialSharedDraft }: GiftTrackerAppProps) {
       people: people.length,
       wishlist: wantedCount,
     };
-  }, [gifts, people, wishes, selectedEventId]);
+  }, [gifts, events, people, wishes, selectedEventId]);
 
   const currentHeading = useMemo(() => {
     if (activeTab === 'events') {
-      if (selectedEventId === 'year:2026') return '2026 Occasions';
+      if (selectedEventId === 'all:active' || selectedEventId === 'year:2026') {
+        return 'All Active Occasions';
+      }
       return events.find((e) => e.id === selectedEventId)?.name || 'Events & Occasions';
     }
     if (activeTab === 'ideas') return 'Gift Ideas & Stash';
@@ -126,8 +131,8 @@ export function GiftTrackerApp({ initialSharedDraft }: GiftTrackerAppProps) {
         defaults?.eventId !== undefined
           ? defaults.eventId
           : activeTab === 'events'
-          ? selectedEventId === 'year:2026'
-            ? '2026-christmas'
+          ? selectedEventId === 'all:active' || selectedEventId === 'year:2026'
+            ? events.find((e) => !e.isArchived)?.id || '2026-christmas'
             : selectedEventId
           : null,
     });

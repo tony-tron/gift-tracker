@@ -24,6 +24,7 @@ import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Lightbulb
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.Unarchive
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -58,6 +59,7 @@ import com.tonytron.gifttracker.data.model.NavTab
 import com.tonytron.gifttracker.data.model.Person
 import com.tonytron.gifttracker.ui.GiftTrackerViewModel
 import com.tonytron.gifttracker.ui.components.ExpressiveAvatar
+import java.util.Calendar
 import com.tonytron.gifttracker.ui.components.ExpressiveBudgetBar
 import com.tonytron.gifttracker.ui.components.GiftStatusConnectedGroup
 
@@ -76,7 +78,7 @@ fun EventsScreen(
     var searchQuery by rememberSaveable { mutableStateOf("") }
     var showArchived by rememberSaveable { mutableStateOf(false) }
     var creatingEvent by rememberSaveable { mutableStateOf(false) }
-    var newYear by rememberSaveable { mutableIntStateOf(2026) }
+    var newYear by rememberSaveable { mutableIntStateOf(Calendar.getInstance().get(Calendar.YEAR)) }
     var newOccasion by rememberSaveable { mutableStateOf("Christmas") }
     var newCustomTitle by rememberSaveable { mutableStateOf("") }
 
@@ -85,13 +87,13 @@ fun EventsScreen(
     val archivedEvents = remember(dataset.events) { dataset.events.filter { it.isArchived } }
 
     val selectedEventId = prefs.selectedEventId
-    val isYear2026Mode = selectedEventId == "year:2026"
+    val isAllActiveMode = selectedEventId == "all:active" || selectedEventId == "year:2026"
     val currentEvent = dataset.events.firstOrNull { it.id == selectedEventId } ?: dataset.events.firstOrNull()
 
-    val eventGifts = remember(dataset.gifts, dataset.events, selectedEventId) {
-        if (isYear2026Mode) {
-            val ids2026 = dataset.events.filter { it.year == 2026 }.map { it.id }.toSet()
-            dataset.gifts.filter { it.eventId != null && it.eventId in ids2026 }
+    val eventGifts = remember(dataset.gifts, activeEvents, selectedEventId, isAllActiveMode) {
+        if (isAllActiveMode) {
+            val activeIds = activeEvents.map { it.id }.toSet()
+            dataset.gifts.filter { it.eventId != null && it.eventId in activeIds }
         } else {
             dataset.gifts.filter { it.eventId == selectedEventId }
         }
@@ -157,20 +159,20 @@ fun EventsScreen(
                 }
 
                 FilterChip(
-                    selected = isYear2026Mode,
+                    selected = isAllActiveMode,
                     onClick = {
-                        viewModel.selectEvent("year:2026")
+                        viewModel.selectEvent("all:active")
                         personFilter = "all"
                     },
-                    label = { Text("🗓️ All 2026") }
+                    label = { Text("🗓️ All Active") }
                 )
 
                 if (archivedEvents.isNotEmpty()) {
                     FilterChip(
-                        selected = showArchived || (currentEvent?.isArchived == true && !isYear2026Mode),
+                        selected = showArchived || (currentEvent?.isArchived == true && !isAllActiveMode),
                         onClick = { showArchived = !showArchived },
                         leadingIcon = { Icon(Icons.Rounded.Archive, null, Modifier.size(16.dp)) },
-                        label = { Text("Past Years") }
+                        label = { Text("Archived") }
                     )
                 }
 
@@ -300,16 +302,40 @@ fun EventsScreen(
                             )
                         }
 
-                        if (isTwoPane) {
-                            FilledTonalButton(
-                                onClick = {
-                                    val target = if (isYear2026Mode) "2026-christmas" else selectedEventId
-                                    viewModel.openNewGiftComposer(eventId = target)
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            if (!isAllActiveMode && currentEvent != null) {
+                                TextButton(
+                                    onClick = {
+                                        viewModel.setEventArchived(currentEvent.id, !currentEvent.isArchived)
+                                    }
+                                ) {
+                                    Icon(
+                                        if (currentEvent.isArchived) Icons.Rounded.Unarchive else Icons.Rounded.Archive,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(Modifier.width(4.dp))
+                                    Text(
+                                        if (currentEvent.isArchived) "Unarchive" else "Archive",
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
                                 }
-                            ) {
-                                Icon(Icons.Rounded.Add, null, Modifier.size(18.dp))
-                                Spacer(Modifier.width(4.dp))
-                                Text("Add Gift", maxLines = 1, softWrap = false)
+                            }
+                            if (isTwoPane) {
+                                FilledTonalButton(
+                                    onClick = {
+                                        val target = if (isAllActiveMode) activeEvents.firstOrNull()?.id else selectedEventId
+                                        viewModel.openNewGiftComposer(eventId = target)
+                                    }
+                                ) {
+                                    Icon(Icons.Rounded.Add, null, Modifier.size(18.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Add Gift", maxLines = 1, softWrap = false)
+                                }
                             }
                         }
                     }

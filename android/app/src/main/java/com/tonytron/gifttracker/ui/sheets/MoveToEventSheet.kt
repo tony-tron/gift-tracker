@@ -1,14 +1,14 @@
 package com.tonytron.gifttracker.ui.sheets
 
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
@@ -30,6 +30,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.tonytron.gifttracker.data.model.GiftItem
 import com.tonytron.gifttracker.ui.GiftTrackerViewModel
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun MoveToEventSheet(
     gift: GiftItem,
@@ -89,11 +90,10 @@ fun MoveToEventSheet(
 
             if (dataset.people.isNotEmpty()) {
                 Text("Recipient", style = MaterialTheme.typography.labelLarge)
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     FilterChip(
                         selected = selectedPersonId == null,
