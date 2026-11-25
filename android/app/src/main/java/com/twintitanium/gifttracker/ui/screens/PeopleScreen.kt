@@ -17,11 +17,13 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Checkroom
+import androidx.compose.material.icons.rounded.DragHandle
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
@@ -45,11 +47,14 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -60,6 +65,12 @@ import com.twintitanium.gifttracker.data.model.Person
 import com.twintitanium.gifttracker.ui.GiftTrackerViewModel
 import com.twintitanium.gifttracker.ui.components.ExpressiveAvatar
 import com.twintitanium.gifttracker.ui.components.ExpressiveBudgetBar
+import com.twintitanium.gifttracker.ui.components.dragHandle
+import com.twintitanium.gifttracker.ui.components.draggableItemModifier
+import com.twintitanium.gifttracker.ui.components.longPressDraggable
+import com.twintitanium.gifttracker.ui.components.onSecondaryClick
+import com.twintitanium.gifttracker.ui.components.pointerHandCursor
+import com.twintitanium.gifttracker.ui.components.rememberDragDropState
 
 enum class PeopleSortOption(val label: String) {
     DEFAULT("Default"),
@@ -75,7 +86,9 @@ enum class PeopleSortOption(val label: String) {
 fun PeopleScreen(
     viewModel: GiftTrackerViewModel,
     isTwoPane: Boolean,
-    contentPadding: PaddingValues
+    contentPadding: PaddingValues,
+    searchFocusTick: Int = 0,
+    escapeTick: Int = 0
 ) {
     val dataset by viewModel.dataset.collectAsStateWithLifecycle()
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -85,6 +98,24 @@ fun PeopleScreen(
     var reorderMode by rememberSaveable { mutableStateOf(false) }
     var showSortMenu by remember { mutableStateOf(false) }
     var mobileDetailOpen by rememberSaveable { mutableStateOf(false) }
+
+    val searchFocusRequester = remember { FocusRequester() }
+
+    LaunchedEffect(searchFocusTick) {
+        if (searchFocusTick > 0) {
+            runCatching { searchFocusRequester.requestFocus() }
+        }
+    }
+
+    LaunchedEffect(escapeTick) {
+        if (escapeTick > 0) {
+            if (reorderMode) {
+                reorderMode = false
+            } else if (!isTwoPane && mobileDetailOpen) {
+                mobileDetailOpen = false
+            }
+        }
+    }
 
     val filteredPeople = remember(dataset.people, dataset.gifts, searchQuery, sortOption) {
         val base = if (searchQuery.isBlank()) dataset.people
@@ -132,7 +163,28 @@ fun PeopleScreen(
 
     @Composable
     fun DirectoryPane(modifier: Modifier = Modifier) {
+        val canReorder = reorderMode && sortOption == PeopleSortOption.DEFAULT && searchQuery.isBlank() && filteredPeople.size > 1
+        var localPeopleOrder by remember(filteredPeople) { mutableStateOf(filteredPeople) }
+        val listState = rememberLazyListState()
+        val dragDropState = rememberDragDropState(
+            lazyListState = listState,
+            headerCount = 2,
+            itemCount = localPeopleOrder.size,
+            onMove = { fromIndex, toIndex ->
+                localPeopleOrder = localPeopleOrder.toMutableList().apply {
+                    add(toIndex, removeAt(fromIndex))
+                }
+            },
+            onDragEnd = {
+                val newIds = localPeopleOrder.map { it.id }
+                if (newIds != filteredPeople.map { it.id }) {
+                    viewModel.reorderPeople(newIds)
+                }
+            }
+        )
+
         LazyColumn(
+            state = listState,
             modifier = modifier,
             contentPadding = if (isTwoPane) PaddingValues(0.dp) else contentPadding,
             verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -150,7 +202,9 @@ fun PeopleScreen(
                         leadingIcon = { Icon(Icons.Rounded.Search, null) },
                         singleLine = true,
                         shape = RoundedCornerShape(99.dp),
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier
+                            .weight(1f)
+                            .focusRequester(searchFocusRequester)
                     )
                     Button(onClick = { viewModel.openPersonEditor(null) }) {
                         Icon(Icons.Rounded.PersonAdd, contentDescription = "Add Person", modifier = Modifier.size(18.dp))
@@ -200,7 +254,7 @@ fun PeopleScreen(
                 }
             }
 
-            if (filteredPeople.isEmpty()) {
+            if (localPeopleOrder.isEmpty()) {
                 item {
                     Card(
                         shape = RoundedCornerShape(24.dp),
@@ -226,22 +280,32 @@ fun PeopleScreen(
                     }
                 }
             } else {
-                itemsIndexed(filteredPeople, key = { _, it -> it.id }) { index, person ->
+                itemsIndexed(localPeopleOrder, key = { _, it -> it.id }) { index, person ->
                     val isSelected = isTwoPane && activePerson?.id == person.id
                     val spent2026 = dataset.gifts
                         .filter { it.personId == person.id && it.eventId == "2026-christmas" }
                         .sumOf { it.cost }
                     val ideasCount = dataset.gifts.count { it.personId == person.id && it.eventId == null }
 
-                    Surface(
-                        onClick = {
-                            viewModel.selectPerson(person.id)
-                            if (!isTwoPane) mobileDetailOpen = true
-                        },
-                        shape = RoundedCornerShape(22.dp),
-                        color = if (isSelected) MaterialTheme.colorScheme.secondaryContainer
-                        else MaterialTheme.colorScheme.surfaceContainer
-                    ) {
+                    var showContextMenu by remember { mutableStateOf(false) }
+
+                    Box {
+                        Surface(
+                            onClick = {
+                                if (!canReorder) {
+                                    viewModel.selectPerson(person.id)
+                                    if (!isTwoPane) mobileDetailOpen = true
+                                }
+                            },
+                            modifier = Modifier
+                                .then(draggableItemModifier(dragDropState, person.id))
+                                .longPressDraggable(dragDropState, person.id, enabled = canReorder)
+                                .then(if (!canReorder) Modifier.pointerHandCursor() else Modifier)
+                                .onSecondaryClick(enabled = !canReorder) { showContextMenu = true },
+                            shape = RoundedCornerShape(22.dp),
+                            color = if (isSelected) MaterialTheme.colorScheme.secondaryContainer
+                            else MaterialTheme.colorScheme.surfaceContainer
+                        ) {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -254,6 +318,16 @@ fun PeopleScreen(
                                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                                 modifier = Modifier.weight(1f)
                             ) {
+                                if (canReorder) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.DragHandle,
+                                        contentDescription = "Drag to reorder",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier
+                                            .dragHandle(dragDropState, person.id, enabled = true)
+                                            .padding(4.dp)
+                                    )
+                                }
                                 ExpressiveAvatar(
                                     name = person.name,
                                     shapeName = person.avatarShape,
@@ -275,15 +349,14 @@ fun PeopleScreen(
                             }
 
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                if (reorderMode && sortOption == PeopleSortOption.DEFAULT && searchQuery.isBlank()) {
+                                if (canReorder) {
                                     IconButton(
                                         enabled = index > 0,
                                         onClick = {
-                                            val list = dataset.people.sortedBy { it.order }.toMutableList()
-                                            val fromIdx = list.indexOfFirst { it.id == person.id }
-                                            if (fromIdx > 0) {
-                                                val item = list.removeAt(fromIdx)
-                                                list.add(fromIdx - 1, item)
+                                            val list = localPeopleOrder.toMutableList()
+                                            if (index > 0) {
+                                                val item = list.removeAt(index)
+                                                list.add(index - 1, item)
                                                 viewModel.reorderPeople(list.map { it.id })
                                             }
                                         }
@@ -291,13 +364,12 @@ fun PeopleScreen(
                                         Icon(Icons.Rounded.KeyboardArrowUp, contentDescription = "Move Up")
                                     }
                                     IconButton(
-                                        enabled = index < filteredPeople.size - 1,
+                                        enabled = index < localPeopleOrder.size - 1,
                                         onClick = {
-                                            val list = dataset.people.sortedBy { it.order }.toMutableList()
-                                            val fromIdx = list.indexOfFirst { it.id == person.id }
-                                            if (fromIdx in 0 until list.size - 1) {
-                                                val item = list.removeAt(fromIdx)
-                                                list.add(fromIdx + 1, item)
+                                            val list = localPeopleOrder.toMutableList()
+                                            if (index < list.size - 1) {
+                                                val item = list.removeAt(index)
+                                                list.add(index + 1, item)
                                                 viewModel.reorderPeople(list.map { it.id })
                                             }
                                         }
@@ -328,6 +400,35 @@ fun PeopleScreen(
                                     }
                                 }
                             }
+                        }
+                    }
+
+                        DropdownMenu(
+                            expanded = showContextMenu,
+                            onDismissRequest = { showContextMenu = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("View Profile") },
+                                onClick = {
+                                    showContextMenu = false
+                                    viewModel.selectPerson(person.id)
+                                    if (!isTwoPane) mobileDetailOpen = true
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Add Gift for ${person.name}") },
+                                onClick = {
+                                    showContextMenu = false
+                                    viewModel.openNewGiftComposer(personId = person.id)
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Edit Person") },
+                                onClick = {
+                                    showContextMenu = false
+                                    viewModel.openPersonEditor(person)
+                                }
+                            )
                         }
                     }
                 }

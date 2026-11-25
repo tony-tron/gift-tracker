@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -37,6 +38,7 @@ import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.DeleteOutline
+import androidx.compose.material.icons.rounded.DragHandle
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
@@ -50,6 +52,10 @@ import androidx.compose.material3.ButtonGroupDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilledTonalToggleButton
@@ -64,6 +70,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -88,11 +95,18 @@ import com.twintitanium.gifttracker.data.model.SharedWishlistLink
 import com.twintitanium.gifttracker.data.model.WishItem
 import com.twintitanium.gifttracker.data.remote.FirebaseSyncManager
 import com.twintitanium.gifttracker.ui.GiftTrackerViewModel
+import com.twintitanium.gifttracker.ui.components.dragHandle
+import com.twintitanium.gifttracker.ui.components.draggableItemModifier
+import com.twintitanium.gifttracker.ui.components.longPressDraggable
+import com.twintitanium.gifttracker.ui.components.onSecondaryClick
+import com.twintitanium.gifttracker.ui.components.rememberDragDropState
 
 @Composable
 fun WishlistScreen(
     viewModel: GiftTrackerViewModel,
-    contentPadding: PaddingValues
+    contentPadding: PaddingValues,
+    isWide: Boolean = false,
+    escapeTick: Int = 0
 ) {
     val dataset by viewModel.dataset.collectAsStateWithLifecycle()
     val uriHandler = LocalUriHandler.current
@@ -120,18 +134,57 @@ fun WishlistScreen(
     // Reorder mode state
     var reorderMode by rememberSaveable { mutableStateOf(false) }
 
+    LaunchedEffect(escapeTick) {
+        if (escapeTick > 0) {
+            when {
+                editingWishId != null -> editingWishId = null
+                loggingWishId != null -> loggingWishId = null
+                reorderMode -> reorderMode = false
+            }
+        }
+    }
+
     val sortedWishes = remember(dataset.wishes) { dataset.wishes.sortedBy { it.order } }
     val wantedWishes = remember(sortedWishes) { sortedWishes.filter { !it.received } }
     val receivedWishes = remember(sortedWishes) { sortedWishes.filter { it.received } }
     val displayed = if (filter == "wanted") wantedWishes else receivedWishes
 
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .imePadding(),
-        contentPadding = contentPadding,
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+    val canReorder = reorderMode && displayed.size > 1 && editingWishId == null
+    var localWishesOrder by remember(displayed) { mutableStateOf(displayed) }
+    val listState = rememberLazyListState()
+    val dragDropState = rememberDragDropState(
+        lazyListState = listState,
+        headerCount = 3,
+        itemCount = localWishesOrder.size,
+        onMove = { fromIndex, toIndex ->
+            localWishesOrder = localWishesOrder.toMutableList().apply {
+                add(toIndex, removeAt(fromIndex))
+            }
+        },
+        onDragEnd = {
+            val newIds = localWishesOrder.map { it.id }
+            if (newIds != displayed.map { it.id }) {
+                val others = if (filter == "wanted") receivedWishes else wantedWishes
+                val merged = if (filter == "wanted") localWishesOrder + others else others + localWishesOrder
+                viewModel.reorderWishes(merged.map { it.id })
+            }
+        }
+    )
+
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.TopCenter
     ) {
+        LazyColumn(
+            state = listState,
+            modifier = Modifier
+                .fillMaxHeight()
+                .then(if (isWide) Modifier.widthIn(max = 840.dp) else Modifier)
+                .fillMaxWidth()
+                .imePadding(),
+            contentPadding = contentPadding,
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
         // Hero Shareable Wishlist Card
         item {
             Card(
@@ -273,7 +326,7 @@ fun WishlistScreen(
             }
         }
 
-        if (displayed.isEmpty()) {
+        if (localWishesOrder.isEmpty()) {
             item {
                 Card(
                     shape = RoundedCornerShape(22.dp),
@@ -288,14 +341,20 @@ fun WishlistScreen(
                 }
             }
         } else {
-            itemsIndexed(displayed, key = { _, it -> it.id }) { index, wish ->
+            itemsIndexed(localWishesOrder, key = { _, it -> it.id }) { index, wish ->
                 val isLogging = loggingWishId == wish.id
                 val isEditing = editingWishId == wish.id
+                var showContextMenu by remember { mutableStateOf(false) }
 
-                ElevatedCard(
-                    shape = RoundedCornerShape(22.dp),
-                    colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)
-                ) {
+                Box {
+                    ElevatedCard(
+                        modifier = Modifier
+                            .then(draggableItemModifier(dragDropState, wish.id))
+                            .longPressDraggable(dragDropState, wish.id, enabled = canReorder && !isEditing)
+                            .onSecondaryClick(enabled = !canReorder && !isEditing) { showContextMenu = true },
+                        shape = RoundedCornerShape(22.dp),
+                        colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)
+                    ) {
                     Column(
                         modifier = Modifier.padding(16.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -359,6 +418,17 @@ fun WishlistScreen(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
+                                if (canReorder) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.DragHandle,
+                                        contentDescription = "Drag to reorder",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier
+                                            .dragHandle(dragDropState, wish.id, enabled = true)
+                                            .padding(end = 8.dp, top = 4.dp, bottom = 4.dp)
+                                    )
+                                }
+
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
                                         text = wish.title,
@@ -376,11 +446,11 @@ fun WishlistScreen(
                                 }
 
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    if (reorderMode && displayed.size > 1) {
+                                    if (canReorder) {
                                         IconButton(
                                             enabled = index > 0,
                                             onClick = {
-                                                val mutable = displayed.toMutableList()
+                                                val mutable = localWishesOrder.toMutableList()
                                                 if (index > 0) {
                                                     val item = mutable.removeAt(index)
                                                     mutable.add(index - 1, item)
@@ -393,9 +463,9 @@ fun WishlistScreen(
                                             Icon(Icons.Rounded.KeyboardArrowUp, contentDescription = "Move Up")
                                         }
                                         IconButton(
-                                            enabled = index < displayed.size - 1,
+                                            enabled = index < localWishesOrder.size - 1,
                                             onClick = {
-                                                val mutable = displayed.toMutableList()
+                                                val mutable = localWishesOrder.toMutableList()
                                                 if (index < mutable.size - 1) {
                                                     val item = mutable.removeAt(index)
                                                     mutable.add(index + 1, item)
@@ -521,9 +591,65 @@ fun WishlistScreen(
                             }
                         }
                     }
+                    }
+
+                    DropdownMenu(
+                        expanded = showContextMenu,
+                        onDismissRequest = { showContextMenu = false }
+                    ) {
+                        if (!wish.received) {
+                            DropdownMenuItem(
+                                text = { Text("Mark Received") },
+                                onClick = {
+                                    showContextMenu = false
+                                    loggingWishId = wish.id
+                                    fromInput = ""
+                                    whenInput = "Christmas 2026"
+                                }
+                            )
+                        } else {
+                            DropdownMenuItem(
+                                text = { Text("Undo Received") },
+                                onClick = {
+                                    showContextMenu = false
+                                    viewModel.updateWish(
+                                        wish.copy(received = false, receivedFrom = "", receivedWhen = "")
+                                    )
+                                }
+                            )
+                        }
+                        DropdownMenuItem(
+                            text = { Text("Edit Wish") },
+                            onClick = {
+                                showContextMenu = false
+                                editingWishId = wish.id
+                                editTitle = wish.title
+                                editUrl = wish.url
+                                editNotes = wish.notes
+                                loggingWishId = null
+                            }
+                        )
+                        if (wish.url.isNotBlank()) {
+                            DropdownMenuItem(
+                                text = { Text("Open Link") },
+                                onClick = {
+                                    showContextMenu = false
+                                    runCatching { uriHandler.openUri(wish.url) }
+                                }
+                            )
+                        }
+                        DropdownMenuItem(
+                            text = { Text("Delete Wish") },
+                            onClick = {
+                                showContextMenu = false
+                                viewModel.deleteWish(wish.id)
+                            }
+                        )
+                    }
                 }
             }
         }
+    }
     }
 
     // Share & Manage Group Links Sheet

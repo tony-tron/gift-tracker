@@ -2,6 +2,10 @@ package com.twintitanium.gifttracker
 
 import android.content.Intent
 import android.os.Bundle
+import android.view.KeyEvent
+import android.view.KeyboardShortcutGroup
+import android.view.KeyboardShortcutInfo
+import android.view.Menu
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -40,6 +44,23 @@ class MainActivity : ComponentActivity() {
                 )
             }
         }
+    }
+
+    override fun onProvideKeyboardShortcuts(
+        data: MutableList<KeyboardShortcutGroup>?,
+        menu: Menu?,
+        deviceId: Int
+    ) {
+        super.onProvideKeyboardShortcuts(data, menu, deviceId)
+        val shortcuts = listOf(
+            KeyboardShortcutInfo("New Gift or Idea", KeyEvent.KEYCODE_N, KeyEvent.META_CTRL_ON),
+            KeyboardShortcutInfo("Search", KeyEvent.KEYCODE_F, KeyEvent.META_CTRL_ON),
+            KeyboardShortcutInfo("Occasions Tab", KeyEvent.KEYCODE_1, KeyEvent.META_CTRL_ON),
+            KeyboardShortcutInfo("Ideas Tab", KeyEvent.KEYCODE_2, KeyEvent.META_CTRL_ON),
+            KeyboardShortcutInfo("People Tab", KeyEvent.KEYCODE_3, KeyEvent.META_CTRL_ON),
+            KeyboardShortcutInfo("Wishlist Tab", KeyEvent.KEYCODE_4, KeyEvent.META_CTRL_ON)
+        )
+        data?.add(KeyboardShortcutGroup("Gift Tracker", shortcuts))
     }
 
     override fun onNewIntent(intent: Intent) {

@@ -1,8 +1,12 @@
 package com.twintitanium.gifttracker.ui.screens
 
+import android.content.ClipDescription
 import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.draganddrop.dragAndDropTarget
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,6 +24,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Celebration
@@ -50,16 +55,28 @@ import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draganddrop.DragAndDropEvent
+import androidx.compose.ui.draganddrop.DragAndDropTarget
+import androidx.compose.ui.draganddrop.mimeTypes
+import androidx.compose.ui.draganddrop.toAndroidDragEvent
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -80,6 +97,7 @@ private data class NavDestination(
     val count: Int
 )
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun GiftTrackerRoot(
     viewModel: GiftTrackerViewModel,
@@ -92,8 +110,39 @@ fun GiftTrackerRoot(
 
     val snackbarHostState = remember { SnackbarHostState() }
     val haptics = LocalHapticFeedback.current
+    val context = LocalContext.current
     val isCompact = widthSizeClass == WindowWidthSizeClass.Compact
     val isExpanded = widthSizeClass == WindowWidthSizeClass.Expanded
+
+    var searchFocusTick by remember { mutableIntStateOf(0) }
+    var escapeTick by remember { mutableIntStateOf(0) }
+    var isExternalDragOver by remember { mutableStateOf(false) }
+
+    val externalDropTarget = remember(context, viewModel) {
+        object : DragAndDropTarget {
+            override fun onEntered(event: DragAndDropEvent) {
+                isExternalDragOver = true
+            }
+
+            override fun onExited(event: DragAndDropEvent) {
+                isExternalDragOver = false
+            }
+
+            override fun onEnded(event: DragAndDropEvent) {
+                isExternalDragOver = false
+            }
+
+            override fun onDrop(event: DragAndDropEvent): Boolean {
+                isExternalDragOver = false
+                val clipData = event.toAndroidDragEvent().clipData ?: return false
+                if (clipData.itemCount == 0) return false
+                val text = clipData.getItemAt(0).coerceToText(context)?.toString()?.trim().orEmpty()
+                if (text.isBlank()) return false
+                viewModel.handleIncomingShare(text, null)
+                return true
+            }
+        }
+    }
 
     LaunchedEffect(viewModel) {
         viewModel.snackbarEvents.collect { event ->
@@ -139,7 +188,62 @@ fun GiftTrackerRoot(
     val isSynced = cloudState.syncStatus == SyncStatus.SYNCED
 
     Surface(
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier
+            .fillMaxSize()
+            .onPreviewKeyEvent { keyEvent ->
+                if (keyEvent.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                when {
+                    keyEvent.isCtrlPressed && keyEvent.key == Key.N -> {
+                        viewModel.openNewGiftComposer()
+                        true
+                    }
+                    keyEvent.isCtrlPressed && keyEvent.key == Key.F -> {
+                        searchFocusTick++
+                        true
+                    }
+                    keyEvent.isCtrlPressed && keyEvent.key == Key.One -> {
+                        viewModel.setActiveTab(NavTab.EVENTS)
+                        true
+                    }
+                    keyEvent.isCtrlPressed && keyEvent.key == Key.Two -> {
+                        viewModel.setActiveTab(NavTab.IDEAS)
+                        true
+                    }
+                    keyEvent.isCtrlPressed && keyEvent.key == Key.Three -> {
+                        viewModel.setActiveTab(NavTab.PEOPLE)
+                        true
+                    }
+                    keyEvent.isCtrlPressed && keyEvent.key == Key.Four -> {
+                        viewModel.setActiveTab(NavTab.WISHLIST)
+                        true
+                    }
+                    keyEvent.key == Key.Escape -> {
+                        when {
+                            uiState.composerPreset != null -> { viewModel.closeGiftComposer(); true }
+                            uiState.movingGift != null -> { viewModel.closeMoveGiftSheet(); true }
+                            uiState.isPersonSheetOpen -> { viewModel.closePersonEditor(); true }
+                            uiState.isSettingsOpen -> { viewModel.closeSettings(); true }
+                            else -> { escapeTick++; false }
+                        }
+                    }
+                    else -> false
+                }
+            }
+            .dragAndDropTarget(
+                shouldStartDragAndDrop = { event ->
+                    event.mimeTypes().contains(ClipDescription.MIMETYPE_TEXT_PLAIN)
+                },
+                target = externalDropTarget
+            )
+            .then(
+                if (isExternalDragOver) {
+                    Modifier.border(
+                        width = 3.dp,
+                        color = MaterialTheme.colorScheme.primary,
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                } else Modifier
+            ),
         color = MaterialTheme.colorScheme.background
     ) {
         Row(modifier = Modifier.fillMaxSize()) {
@@ -297,22 +401,47 @@ fun GiftTrackerRoot(
                             NavTab.EVENTS -> EventsScreen(
                                 viewModel = viewModel,
                                 isTwoPane = isExpanded || widthSizeClass == WindowWidthSizeClass.Medium,
-                                contentPadding = contentPadding
+                                contentPadding = contentPadding,
+                                searchFocusTick = searchFocusTick
                             )
                             NavTab.IDEAS -> IdeasScreen(
                                 viewModel = viewModel,
                                 isWide = !isCompact,
-                                contentPadding = contentPadding
+                                contentPadding = contentPadding,
+                                searchFocusTick = searchFocusTick
                             )
                             NavTab.PEOPLE -> PeopleScreen(
                                 viewModel = viewModel,
                                 isTwoPane = !isCompact,
-                                contentPadding = contentPadding
+                                contentPadding = contentPadding,
+                                searchFocusTick = searchFocusTick,
+                                escapeTick = escapeTick
                             )
                             NavTab.WISHLIST -> WishlistScreen(
                                 viewModel = viewModel,
-                                contentPadding = contentPadding
+                                isWide = !isCompact,
+                                contentPadding = contentPadding,
+                                escapeTick = escapeTick
                             )
+                        }
+
+                        if (isExternalDragOver) {
+                            Surface(
+                                modifier = Modifier
+                                    .align(Alignment.TopCenter)
+                                    .padding(top = innerPadding.calculateTopPadding() + 12.dp),
+                                shape = CircleShape,
+                                color = MaterialTheme.colorScheme.primaryContainer,
+                                shadowElevation = 6.dp
+                            ) {
+                                Text(
+                                    text = "Drop link or text to add gift",
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 13.sp,
+                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                                )
+                            }
                         }
                     }
 

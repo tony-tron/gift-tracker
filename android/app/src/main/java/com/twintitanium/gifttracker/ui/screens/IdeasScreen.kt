@@ -32,9 +32,13 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.foundation.layout.Box
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -42,6 +46,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -51,15 +57,24 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.twintitanium.gifttracker.ui.GiftTrackerViewModel
 import com.twintitanium.gifttracker.ui.components.ExpressiveAvatar
 import com.twintitanium.gifttracker.ui.components.MoveIdeaSplitButton
+import com.twintitanium.gifttracker.ui.components.onSecondaryClick
 
 @Composable
 fun IdeasScreen(
     viewModel: GiftTrackerViewModel,
     isWide: Boolean,
-    contentPadding: PaddingValues
+    contentPadding: PaddingValues,
+    searchFocusTick: Int = 0
 ) {
     val dataset by viewModel.dataset.collectAsStateWithLifecycle()
     val uriHandler = LocalUriHandler.current
+    val searchFocusRequester = remember { FocusRequester() }
+
+    LaunchedEffect(searchFocusTick) {
+        if (searchFocusTick > 0) {
+            runCatching { searchFocusRequester.requestFocus() }
+        }
+    }
 
     var modeFilter by rememberSaveable { mutableStateOf("all") } // all | ideas | stockpile | pool
     var personFilter by rememberSaveable { mutableStateOf("all") }
@@ -150,7 +165,9 @@ fun IdeasScreen(
                     leadingIcon = { Icon(Icons.Rounded.Search, null) },
                     singleLine = true,
                     shape = RoundedCornerShape(99.dp),
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .focusRequester(searchFocusRequester)
                 )
 
                 Row(
@@ -239,12 +256,16 @@ fun IdeasScreen(
         } else {
             items(filteredIdeas, key = { it.id }) { idea ->
                 val person = idea.personId?.let { personMap[it] }
-                ElevatedCard(
-                    shape = RoundedCornerShape(24.dp),
-                    colors = CardDefaults.elevatedCardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceContainer
-                    )
-                ) {
+                var showContextMenu by remember { mutableStateOf(false) }
+
+                Box {
+                    ElevatedCard(
+                        modifier = Modifier.onSecondaryClick { showContextMenu = true },
+                        shape = RoundedCornerShape(24.dp),
+                        colors = CardDefaults.elevatedCardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainer
+                        )
+                    ) {
                     Column(
                         modifier = Modifier.padding(16.dp),
                         verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -344,6 +365,43 @@ fun IdeasScreen(
                                 )
                             }
                         }
+                    }
+                    }
+
+                    DropdownMenu(
+                        expanded = showContextMenu,
+                        onDismissRequest = { showContextMenu = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Edit Idea") },
+                            onClick = {
+                                showContextMenu = false
+                                viewModel.openEditGiftComposer(idea)
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Move to Occasion...") },
+                            onClick = {
+                                showContextMenu = false
+                                viewModel.openMoveGiftSheet(idea)
+                            }
+                        )
+                        if (idea.url.isNotBlank()) {
+                            DropdownMenuItem(
+                                text = { Text("Open Link") },
+                                onClick = {
+                                    showContextMenu = false
+                                    runCatching { uriHandler.openUri(idea.url) }
+                                }
+                            )
+                        }
+                        DropdownMenuItem(
+                            text = { Text("Delete Idea") },
+                            onClick = {
+                                showContextMenu = false
+                                viewModel.deleteGiftWithUndo(idea.id)
+                            }
+                        )
                     }
                 }
             }

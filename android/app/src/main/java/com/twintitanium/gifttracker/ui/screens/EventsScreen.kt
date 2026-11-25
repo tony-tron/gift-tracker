@@ -31,7 +31,10 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.foundation.layout.Box
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -40,6 +43,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -48,6 +52,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -62,16 +68,25 @@ import com.twintitanium.gifttracker.ui.components.ExpressiveAvatar
 import java.util.Calendar
 import com.twintitanium.gifttracker.ui.components.ExpressiveBudgetBar
 import com.twintitanium.gifttracker.ui.components.GiftStatusConnectedGroup
+import com.twintitanium.gifttracker.ui.components.onSecondaryClick
 
 @Composable
 fun EventsScreen(
     viewModel: GiftTrackerViewModel,
     isTwoPane: Boolean,
-    contentPadding: PaddingValues
+    contentPadding: PaddingValues,
+    searchFocusTick: Int = 0
 ) {
     val dataset by viewModel.dataset.collectAsStateWithLifecycle()
     val prefs by viewModel.preferences.collectAsStateWithLifecycle()
     val uriHandler = LocalUriHandler.current
+    val searchFocusRequester = remember { FocusRequester() }
+
+    LaunchedEffect(searchFocusTick) {
+        if (searchFocusTick > 0) {
+            runCatching { searchFocusRequester.requestFocus() }
+        }
+    }
 
     var personFilter by rememberSaveable { mutableStateOf("all") }
     var statusFilter by rememberSaveable { mutableStateOf("all") } // all | to-buy | to-wrap
@@ -361,7 +376,9 @@ fun EventsScreen(
                 leadingIcon = { Icon(Icons.Rounded.Search, null) },
                 singleLine = true,
                 shape = RoundedCornerShape(99.dp),
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .focusRequester(searchFocusRequester)
             )
 
             Row(
@@ -598,17 +615,22 @@ private fun EventGiftCard(
     onMoveToIdeas: () -> Unit,
     onOpenUrl: (String) -> Unit
 ) {
-    ElevatedCard(
-        shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer
-        ),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+    var showContextMenu by remember { mutableStateOf(false) }
+
+    Box(modifier = Modifier.fillMaxWidth()) {
+        ElevatedCard(
+            shape = RoundedCornerShape(24.dp),
+            colors = CardDefaults.elevatedCardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceContainer
+            ),
+            modifier = Modifier
+                .fillMaxWidth()
+                .onSecondaryClick { showContextMenu = true }
         ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -706,6 +728,45 @@ private fun EventGiftCard(
                         label = { Text("Stash", fontSize = 12.sp) }
                     )
                 }
+            }
+        }
+        }
+
+        DropdownMenu(
+            expanded = showContextMenu,
+            onDismissRequest = { showContextMenu = false }
+        ) {
+            DropdownMenuItem(
+                text = { Text("Edit Gift") },
+                onClick = {
+                    showContextMenu = false
+                    onEdit()
+                }
+            )
+            if (gift.url.isNotBlank()) {
+                DropdownMenuItem(
+                    text = { Text("Open Link") },
+                    onClick = {
+                        showContextMenu = false
+                        onOpenUrl(gift.url)
+                    }
+                )
+            }
+            DropdownMenuItem(
+                text = { Text("Move Back to Ideas") },
+                onClick = {
+                    showContextMenu = false
+                    onMoveToIdeas()
+                }
+            )
+            if (gift.bought) {
+                DropdownMenuItem(
+                    text = { Text("Save to Stash") },
+                    onClick = {
+                        showContextMenu = false
+                        onSaveForLater()
+                    }
+                )
             }
         }
     }
