@@ -132,7 +132,7 @@ export function EventsView({ onOpenNewGift, onEditGift }: EventsViewProps) {
 
   // Suggestions from Ideas Backlog for people who haven't hit budget yet
   const suggestedIdeas = useMemo(() => {
-    const targetEvId = isYear2026Mode ? '2026-christmas' : selectedEventId;
+    const targetEvId = isAllActiveMode ? activeEvents[0]?.id || '2026-christmas' : selectedEventId;
     if (currentEvent?.isArchived && !isAllActiveMode) return [];
     return gifts
       .filter((g) => g.eventId === null && g.personId)
@@ -142,7 +142,7 @@ export function EventsView({ onOpenNewGift, onEditGift }: EventsViewProps) {
         person: idea.personId ? personMap.get(idea.personId) : undefined,
         targetEvId,
       }));
-  }, [gifts, isYear2026Mode, selectedEventId, currentEvent, personMap]);
+  }, [gifts, isAllActiveMode, activeEvents, selectedEventId, currentEvent, personMap]);
 
   const handleCreateEvent = (e: React.FormEvent) => {
     e.preventDefault();
@@ -536,7 +536,9 @@ export function EventsView({ onOpenNewGift, onEditGift }: EventsViewProps) {
                   type="button"
                   onClick={() =>
                     onOpenNewGift({
-                      eventId: isYear2026Mode ? '2026-christmas' : currentEvent?.id || '2026-christmas',
+                      eventId: isAllActiveMode
+                        ? activeEvents[0]?.id || '2026-christmas'
+                        : currentEvent?.id || activeEvents[0]?.id || '2026-christmas',
                     })
                   }
                   className="m3-btn-filled"
@@ -549,7 +551,7 @@ export function EventsView({ onOpenNewGift, onEditGift }: EventsViewProps) {
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
               {filteredGifts.map((gift) => {
                 const person = gift.personId ? personMap.get(gift.personId) : undefined;
-                const evInfo = isYear2026Mode
+                const evInfo = isAllActiveMode
                   ? events.find((e) => e.id === gift.eventId)
                   : undefined;
 
