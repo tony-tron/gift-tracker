@@ -668,9 +668,3 @@ class FirebaseSyncManager(private val appContext: Context) {
         }
     }
 }
-erId"),
-                webClientId = webClientIdOverride?.takeIf { it.isNotBlank() } ?: extract("webClientId")
-            )
-        }
-    }
-}
