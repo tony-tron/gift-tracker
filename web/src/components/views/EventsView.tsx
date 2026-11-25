@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Archive,
   ArchiveRestore,
@@ -45,9 +45,13 @@ export function EventsView({ onOpenNewGift, onEditGift }: EventsViewProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [showArchivedEvents, setShowArchivedEvents] = useState(false);
   const [creatingEvent, setCreatingEvent] = useState(false);
-  const [newYear, setNewYear] = useState(() => new Date().getFullYear());
+  const [newYear, setNewYear] = useState(2026);
   const [newOccasion, setNewOccasion] = useState<OccasionType>('Christmas');
   const [newCustomTitle, setNewCustomTitle] = useState('');
+
+  useEffect(() => {
+    setNewYear(new Date().getFullYear());
+  }, []);
 
   const personMap = useMemo(() => {
     const map = new Map(people.map((p) => [p.id, p]));
