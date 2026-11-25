@@ -1,6 +1,8 @@
 package com.twintitanium.gifttracker.data.remote
 
+import android.app.Activity
 import android.content.Context
+import android.content.ContextWrapper
 import androidx.credentials.CredentialManager
 import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
@@ -11,6 +13,7 @@ import com.google.firebase.FirebaseOptions
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.GoogleAuthProvider
+import com.google.firebase.auth.OAuthProvider
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.twintitanium.gifttracker.data.model.FirebaseRuntimeConfig
@@ -660,6 +663,12 @@ class FirebaseSyncManager(private val appContext: Context) {
                 applicationId = appId,
                 storageBucket = extract("storageBucket") ?: "$projectId.firebasestorage.app",
                 gcmSenderId = extract("messagingSenderId"),
+                webClientId = webClientIdOverride?.takeIf { it.isNotBlank() } ?: extract("webClientId")
+            )
+        }
+    }
+}
+erId"),
                 webClientId = webClientIdOverride?.takeIf { it.isNotBlank() } ?: extract("webClientId")
             )
         }
