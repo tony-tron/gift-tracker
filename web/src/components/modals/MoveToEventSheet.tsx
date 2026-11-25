@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { ArrowRight, CalendarPlus, X } from 'lucide-react';
 import { useGiftStore } from '@/context/GiftStoreContext';
 import type { GiftItem, OccasionType } from '@/lib/types';
@@ -25,10 +25,6 @@ function MoveToEventForm({ gift, onClose }: { gift: GiftItem; onClose: () => voi
   const [newYear, setNewYear] = useState(2026);
   const [newOccasion, setNewOccasion] = useState<OccasionType>('Christmas');
   const [newCustomName, setNewCustomName] = useState('');
-
-  useEffect(() => {
-    setNewYear(new Date().getFullYear());
-  }, []);
 
   const handleConfirm = (e: React.FormEvent) => {
     e.preventDefault();
@@ -124,7 +120,10 @@ function MoveToEventForm({ gift, onClose }: { gift: GiftItem; onClose: () => voi
                 </span>
                 <button
                   type="button"
-                  onClick={() => setCreatingNew(true)}
+                  onClick={() => {
+                    setNewYear(new Date().getFullYear());
+                    setCreatingNew(true);
+                  }}
                   style={{
                     fontSize: '12.5px',
                     fontWeight: 700,

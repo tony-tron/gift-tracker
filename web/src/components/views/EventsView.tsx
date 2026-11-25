@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   Archive,
   ArchiveRestore,
@@ -48,10 +48,6 @@ export function EventsView({ onOpenNewGift, onEditGift }: EventsViewProps) {
   const [newYear, setNewYear] = useState(2026);
   const [newOccasion, setNewOccasion] = useState<OccasionType>('Christmas');
   const [newCustomTitle, setNewCustomTitle] = useState('');
-
-  useEffect(() => {
-    setNewYear(new Date().getFullYear());
-  }, []);
 
   const personMap = useMemo(() => {
     const map = new Map(people.map((p) => [p.id, p]));
@@ -223,7 +219,12 @@ export function EventsView({ onOpenNewGift, onEditGift }: EventsViewProps) {
             type="button"
             className="m3-chip"
             data-selected={creatingEvent}
-            onClick={() => setCreatingEvent((v) => !v)}
+            onClick={() => {
+              if (!creatingEvent) {
+                setNewYear(new Date().getFullYear());
+              }
+              setCreatingEvent((v) => !v);
+            }}
           >
             <CalendarPlus size={14} />
             <span>New Occasion</span>
