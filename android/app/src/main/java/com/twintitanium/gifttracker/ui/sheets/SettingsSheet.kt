@@ -552,7 +552,58 @@ fun SettingsSheet(
                     }
 
                     cloudState.syncError?.let { err ->
-                        Text(err, color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
+                        val parts = err.split("\n\n[Details]\n", limit = 2)
+                        val summary = parts[0]
+                        val details = parts.getOrNull(1)
+                        var showErrorDetails by remember(err) { mutableStateOf(false) }
+
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(summary, color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
+                            if (!details.isNullOrBlank()) {
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    TextButton(
+                                        onClick = { showErrorDetails = !showErrorDetails },
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                                    ) {
+                                        Text(
+                                            if (showErrorDetails) "Hide details" else "Show details",
+                                            fontSize = 12.sp
+                                        )
+                                    }
+                                    if (showErrorDetails) {
+                                        TextButton(
+                                            onClick = {
+                                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                                clipboard.setPrimaryClip(ClipData.newPlainText("Sync Error Details", err))
+                                                viewModel.showMessage("Copied error details to clipboard")
+                                            },
+                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                                        ) {
+                                            Text("Copy error", fontSize = 12.sp)
+                                        }
+                                    }
+                                }
+                                if (showErrorDetails) {
+                                    Surface(
+                                        shape = RoundedCornerShape(12.dp),
+                                        color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.45f),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text(
+                                            text = details,
+                                            color = MaterialTheme.colorScheme.onErrorContainer,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontSize = 11.sp,
+                                            lineHeight = 15.sp,
+                                            modifier = Modifier.padding(10.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }

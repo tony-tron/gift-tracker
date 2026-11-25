@@ -149,12 +149,38 @@ class FirebaseSyncManager(private val appContext: Context) {
         } catch (e: androidx.credentials.exceptions.GetCredentialCancellationException) {
             val sha1 = getAppSigningSha1(activityContext)
             val shaHint = if (sha1 != null) " (Installed APK SHA-1: $sha1)" else ""
+            val details = buildString {
+                appendLine("Exception: ${e::class.java.name}")
+                appendLine("Type: ${e.type}")
+                appendLine("ErrorMessage: ${e.errorMessage}")
+                appendLine("Message: ${e.message}")
+                appendLine("Cause: ${e.cause?.let { "${it::class.java.name}: ${it.message}" } ?: "none"}")
+                appendLine("Package: ${activityContext.packageName}")
+                appendLine("Installed SHA-1: ${sha1 ?: "unknown"}")
+                appendLine("Firebase AppId: ${app.options.applicationId}")
+                append("WebClientId: $trimmedClientId")
+            }
             throw IllegalStateException(
-                "Sign-in canceled or rejected by Google Play Services. If you selected an account, verify your Firebase SHA-1 & OAuth consent screen$shaHint.",
+                "Sign-in canceled or rejected by Google Play Services. If you selected an account, verify your Firebase SHA-1 & OAuth consent screen$shaHint.\n\n[Details]\n$details",
                 e
             )
         } catch (e: androidx.credentials.exceptions.GetCredentialException) {
-            throw IllegalStateException("${e.type}: ${e.errorMessage ?: e.localizedMessage}", e)
+            val sha1 = getAppSigningSha1(activityContext)
+            val details = buildString {
+                appendLine("Exception: ${e::class.java.name}")
+                appendLine("Type: ${e.type}")
+                appendLine("ErrorMessage: ${e.errorMessage}")
+                appendLine("Message: ${e.message}")
+                appendLine("Cause: ${e.cause?.let { "${it::class.java.name}: ${it.message}" } ?: "none"}")
+                appendLine("Package: ${activityContext.packageName}")
+                appendLine("Installed SHA-1: ${sha1 ?: "unknown"}")
+                appendLine("Firebase AppId: ${app.options.applicationId}")
+                append("WebClientId: $trimmedClientId")
+            }
+            throw IllegalStateException(
+                "${e.type}: ${e.errorMessage ?: e.localizedMessage}\n\n[Details]\n$details",
+                e
+            )
         }
 
         val credential = result.credential
