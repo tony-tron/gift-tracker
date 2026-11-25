@@ -2,10 +2,10 @@
 -keepattributes *Annotation*, InnerClasses
 -dontnote kotlinx.serialization.AnnotationsKt
 
--keepclassmembers class com.tonytron.gifttracker.data.model.** {
+-keepclassmembers class com.twintitanium.gifttracker.data.model.** {
     *;
 }
--keep,includedescriptorclasses class com.tonytron.gifttracker.data.model.**$$serializer { *; }
+-keep,includedescriptorclasses class com.twintitanium.gifttracker.data.model.**$$serializer { *; }
 
 # Keep Firestore reflection / model mapping safe
 -keep class com.google.firebase.** { *; }

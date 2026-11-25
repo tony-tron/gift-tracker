@@ -11,12 +11,12 @@ if (file("google-services.json").exists()) {
 }
 
 android {
-    namespace = "com.tonytron.gifttracker"
+    namespace = "com.twintitanium.gifttracker"
     compileSdk = 37
     compileSdkMinor = 2
 
     defaultConfig {
-        applicationId = "com.tonytron.gifttracker"
+        applicationId = "com.twintitanium.gifttracker"
         minSdk = 28
         targetSdk = 36
         versionCode = 4

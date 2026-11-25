@@ -58,16 +58,17 @@ jobs:
           else
             echo "No GOOGLE_SERVICES_JSON secret found; building clean APK with runtime/QR pairing support."
           fi
-      - name: Build Release & Debug APKs
+      - name: Build Release & Debug APKs + Release AAB
         env:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: ./gradlew assembleDebug assembleRelease --no-daemon
-      - name: Upload Installable APK Artifact
+        run: ./gradlew assembleDebug assembleRelease bundleRelease --no-daemon
+      - name: Upload Installable APK & AAB Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: gift-tracker-android-apk
           path: |
             android/app/build/outputs/apk/release/app-release.apk
             android/app/build/outputs/apk/debug/app-debug.apk
+            android/app/build/outputs/bundle/release/app-release.aab
