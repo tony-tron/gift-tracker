@@ -135,6 +135,7 @@ class FirebaseSyncManager(private val appContext: Context) {
         app: FirebaseApp,
         webClientId: String
     ): FirebaseUser {
+        val auth = FirebaseAuth.getInstance(app)
         val credentialManager = CredentialManager.create(activityContext)
         val trimmedClientId = webClientId.trim()
 
@@ -149,46 +150,37 @@ class FirebaseSyncManager(private val appContext: Context) {
                 request = request,
                 context = activityContext
             )
-        } catch (primaryErr: androidx.credentials.exceptions.GetCredentialCancellationException) {
-            val isReauthFailure = primaryErr.errorMessage?.toString()?.contains("reauth", ignoreCase = true) == true
-            if (isReauthFailure) {
-                val googleIdOption = GetGoogleIdOption.Builder()
-                    .setFilterByAuthorizedAccounts(false)
-                    .setServerClientId(trimmedClientId)
-                    .setAutoSelectEnabled(false)
-                    .build()
-                val fallbackRequest = GetCredentialRequest.Builder()
-                    .addCredentialOption(googleIdOption)
-                    .build()
-                try {
-                    credentialManager.getCredential(
-                        request = fallbackRequest,
-                        context = activityContext
-                    )
-                } catch (fallbackErr: androidx.credentials.exceptions.GetCredentialException) {
-                    throw buildSignInDiagnosticException(
-                        activityContext = activityContext,
-                        app = app,
-                        trimmedClientId = trimmedClientId,
-                        primaryErr = primaryErr,
-                        fallbackErr = fallbackErr
-                    )
+        } catch (primaryErr: androidx.credentials.exceptions.GetCredentialException) {
+            val isReauthFailure = primaryErr is androidx.credentials.exceptions.GetCredentialCancellationException &&
+                primaryErr.errorMessage?.toString()?.contains("reauth", ignoreCase = true) == true
+            val isNoCredential = primaryErr is androidx.credentials.exceptions.NoCredentialException
+
+            if (isReauthFailure || isNoCredential) {
+                val activity = activityContext.findActivity()
+                if (activity != null) {
+                    return try {
+                        val provider = OAuthProvider.newBuilder(GoogleAuthProvider.PROVIDER_ID, auth)
+                            .setScopes(listOf("email", "profile"))
+                            .addCustomParameter("prompt", "select_account")
+                            .build()
+                        val authResult = auth.startActivityForSignInWithProvider(activity, provider).await()
+                        authResult.user ?: error("Google browser sign-in returned null FirebaseUser")
+                    } catch (browserErr: Exception) {
+                        throw buildSignInDiagnosticException(
+                            activityContext = activityContext,
+                            app = app,
+                            trimmedClientId = trimmedClientId,
+                            primaryErr = primaryErr,
+                            fallbackErr = browserErr
+                        )
+                    }
                 }
-            } else {
-                throw buildSignInDiagnosticException(
-                    activityContext = activityContext,
-                    app = app,
-                    trimmedClientId = trimmedClientId,
-                    primaryErr = primaryErr,
-                    fallbackErr = null
-                )
             }
-        } catch (e: androidx.credentials.exceptions.GetCredentialException) {
             throw buildSignInDiagnosticException(
                 activityContext = activityContext,
                 app = app,
                 trimmedClientId = trimmedClientId,
-                primaryErr = e,
+                primaryErr = primaryErr,
                 fallbackErr = null
             )
         }
@@ -199,11 +191,17 @@ class FirebaseSyncManager(private val appContext: Context) {
         ) {
             val googleIdToken = GoogleIdTokenCredential.createFrom(credential.data).idToken
             val firebaseCred = GoogleAuthProvider.getCredential(googleIdToken, null)
-            val authResult = FirebaseAuth.getInstance(app).signInWithCredential(firebaseCred).await()
+            val authResult = auth.signInWithCredential(firebaseCred).await()
             return authResult.user ?: error("Google Sign-In returned null FirebaseUser")
         } else {
             error("Unexpected credential type returned by Credential Manager: ${credential::class.java.simpleName}")
         }
+    }
+
+    private tailrec fun Context.findActivity(): Activity? = when (this) {
+        is Activity -> this
+        is ContextWrapper -> baseContext.findActivity()
+        else -> null
     }
 
     private fun buildSignInDiagnosticException(
@@ -211,7 +209,7 @@ class FirebaseSyncManager(private val appContext: Context) {
         app: FirebaseApp,
         trimmedClientId: String,
         primaryErr: androidx.credentials.exceptions.GetCredentialException,
-        fallbackErr: androidx.credentials.exceptions.GetCredentialException?
+        fallbackErr: Exception?
     ): IllegalStateException {
         val sha1 = getAppSigningSha1(activityContext)
         val shaHint = if (sha1 != null) " (Installed APK SHA-1: $sha1)" else ""
@@ -220,16 +218,18 @@ class FirebaseSyncManager(private val appContext: Context) {
             appendLine("Primary ErrorMessage: ${primaryErr.errorMessage}")
             appendLine("Primary Cause: ${primaryErr.cause?.let { "${it::class.java.name}: ${it.message}" } ?: "none"}")
             if (fallbackErr != null) {
-                appendLine("Fallback Type: ${fallbackErr.type}")
-                appendLine("Fallback ErrorMessage: ${fallbackErr.errorMessage}")
-                appendLine("Fallback Cause: ${fallbackErr.cause?.let { "${it::class.java.name}: ${it.message}" } ?: "none"}")
+                appendLine("Browser Fallback Exception: ${fallbackErr::class.java.name}")
+                appendLine("Browser Fallback Message: ${fallbackErr.localizedMessage ?: fallbackErr.message}")
+                appendLine("Browser Fallback Cause: ${fallbackErr.cause?.let { "${it::class.java.name}: ${it.message}" } ?: "none"}")
             }
             appendLine("Package: ${activityContext.packageName}")
             appendLine("Installed SHA-1: ${sha1 ?: "unknown"}")
             appendLine("Firebase AppId: ${app.options.applicationId}")
             append("WebClientId: $trimmedClientId")
         }
-        val summary = if (primaryErr is androidx.credentials.exceptions.GetCredentialCancellationException) {
+        val summary = if (fallbackErr != null) {
+            "Google Sign-In failed in both Credential Manager and browser fallback: ${fallbackErr.localizedMessage ?: fallbackErr.message}"
+        } else if (primaryErr is androidx.credentials.exceptions.GetCredentialCancellationException) {
             "Sign-in canceled or rejected by Google Play Services. If you selected an account, verify your Firebase SHA-1 & OAuth consent screen$shaHint."
         } else {
             "${primaryErr.type}: ${primaryErr.errorMessage ?: primaryErr.localizedMessage}"
