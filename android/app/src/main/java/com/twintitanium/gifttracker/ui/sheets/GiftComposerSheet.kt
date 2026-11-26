@@ -88,14 +88,17 @@ fun GiftComposerSheet(
     var wrapped by remember(preset) { mutableStateOf(editing?.wrapped ?: false) }
     var scraping by remember { mutableStateOf(false) }
 
-    suspend fun runAutoFill(targetUrl: String) {
+    suspend fun runAutoFill(targetUrl: String, showFailureFeedback: Boolean = false) {
         if (targetUrl.isBlank()) return
         scraping = true
         val res = viewModel.scrapeUrl(targetUrl)
-        if (res.title.isNotBlank() && title.isBlank()) title = res.title
+        if (res.title.isNotBlank() && (title.isBlank() || title.trim() == targetUrl.trim())) title = res.title
         if (res.store.isNotBlank() && store.isBlank()) store = res.store
         if (res.price != null && costStr.isBlank()) costStr = res.price.toString()
         if (res.url.isNotBlank()) url = res.url
+        if (showFailureFeedback && res.title.isBlank() && res.store.isBlank() && res.price == null) {
+            viewModel.showMessage("Couldn't auto-fill details from that link")
+        }
         scraping = false
     }
 
@@ -154,7 +157,7 @@ fun GiftComposerSheet(
                 )
                 FilledTonalButton(
                     enabled = url.isNotBlank() && !scraping,
-                    onClick = { scope.launch { runAutoFill(url) } }
+                    onClick = { scope.launch { runAutoFill(url, showFailureFeedback = true) } }
                 ) {
                     if (scraping) {
                         CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)

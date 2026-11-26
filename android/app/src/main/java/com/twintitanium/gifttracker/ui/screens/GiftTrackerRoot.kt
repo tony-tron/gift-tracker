@@ -136,9 +136,26 @@ fun GiftTrackerRoot(
                 isExternalDragOver = false
                 val clipData = event.toAndroidDragEvent().clipData ?: return false
                 if (clipData.itemCount == 0) return false
-                val text = clipData.getItemAt(0).coerceToText(context)?.toString()?.trim().orEmpty()
-                if (text.isBlank()) return false
-                viewModel.handleIncomingShare(text, null)
+                val item = clipData.getItemAt(0)
+                val uriStr = item.uri?.toString()?.trim().orEmpty()
+                val textStr = item.coerceToText(context)?.toString()?.trim().orEmpty()
+                val htmlHref = item.htmlText?.let { html ->
+                    Regex("""href=["'](https?://[^"']+)["']""", RegexOption.IGNORE_CASE)
+                        .find(html)?.groupValues?.getOrNull(1)
+                }.orEmpty()
+
+                val resolvedUrl = when {
+                    uriStr.startsWith("http://", ignoreCase = true) || uriStr.startsWith("https://", ignoreCase = true) -> uriStr
+                    htmlHref.isNotBlank() -> htmlHref
+                    else -> ""
+                }
+                if (resolvedUrl.isNotBlank()) {
+                    val subject = textStr.takeIf { it.isNotBlank() && !it.startsWith("http", ignoreCase = true) }
+                    viewModel.handleIncomingShare(resolvedUrl, subject)
+                    return true
+                }
+                if (textStr.isBlank()) return false
+                viewModel.handleIncomingShare(textStr, null)
                 return true
             }
         }
@@ -232,7 +249,10 @@ fun GiftTrackerRoot(
             }
             .dragAndDropTarget(
                 shouldStartDragAndDrop = { event ->
-                    event.mimeTypes().contains(ClipDescription.MIMETYPE_TEXT_PLAIN)
+                    val mimes = event.mimeTypes()
+                    mimes.contains(ClipDescription.MIMETYPE_TEXT_PLAIN) ||
+                        mimes.contains("text/uri-list") ||
+                        mimes.contains(ClipDescription.MIMETYPE_TEXT_HTML)
                 },
                 target = externalDropTarget
             )

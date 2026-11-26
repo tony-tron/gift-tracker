@@ -16,6 +16,19 @@ data class ScrapedLinkResult(
 object LinkScraper {
 
     private val URL_EXTRACT_REGEX = Regex("""https?://[^\s<>"]+""", RegexOption.IGNORE_CASE)
+    private val BARE_URL_REGEX = Regex(
+        """^(?:www\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)+(?:/[^\s<>"]*)?$""",
+        RegexOption.IGNORE_CASE
+    )
+
+    private fun normalizeUrlIfBare(raw: String): String {
+        val trimmed = raw.trim()
+        if (trimmed.isBlank()) return ""
+        if (trimmed.startsWith("http://", ignoreCase = true) || trimmed.startsWith("https://", ignoreCase = true)) {
+            return trimmed
+        }
+        return if (BARE_URL_REGEX.matches(trimmed)) "https://$trimmed" else trimmed
+    }
 
     private val KNOWN_STORES: List<Pair<Regex, String>> = listOf(
         Regex("""amazon\.|a\.co\b""", RegexOption.IGNORE_CASE) to "Amazon",
@@ -47,8 +60,22 @@ object LinkScraper {
      */
     fun parseSharedText(sharedText: String?, sharedSubject: String?): Pair<String, String> {
         val text = sharedText?.trim().orEmpty()
-        val urlMatch = URL_EXTRACT_REGEX.find(text)?.value?.trimEnd('.', ',', ')').orEmpty()
-        val leftoverText = text.replace(urlMatch, "").trim().trim('-', '|', ':').trim()
+        val explicitUrl = URL_EXTRACT_REGEX.find(text)?.value?.trimEnd('.', ',', ')').orEmpty()
+        val urlMatch = if (explicitUrl.isNotBlank()) {
+            explicitUrl
+        } else {
+            val normalized = normalizeUrlIfBare(text)
+            if (normalized.startsWith("http://", ignoreCase = true) || normalized.startsWith("https://", ignoreCase = true)) {
+                normalized
+            } else ""
+        }
+        val leftoverText = if (explicitUrl.isNotBlank()) {
+            text.replace(explicitUrl, "").trim().trim('-', '|', ':').trim()
+        } else if (urlMatch.isNotBlank()) {
+            ""
+        } else {
+            text
+        }
         val fallbackTitle = when {
             !sharedSubject.isNullOrBlank() && !sharedSubject.startsWith("http") -> sharedSubject.trim()
             leftoverText.isNotBlank() && leftoverText.length < 140 -> leftoverText
@@ -58,21 +85,22 @@ object LinkScraper {
     }
 
     fun inferStoreFromUrl(rawUrl: String): String {
+        val normalized = normalizeUrlIfBare(rawUrl)
         for ((pattern, label) in KNOWN_STORES) {
-            if (pattern.containsMatchIn(rawUrl)) return label
+            if (pattern.containsMatchIn(normalized)) return label
         }
         return runCatching {
-            val host = URI(rawUrl).host?.removePrefix("www.") ?: return ""
+            val host = URI(normalized).host?.removePrefix("www.") ?: return ""
             val base = host.substringBefore('.')
             base.replaceFirstChar { it.uppercase() }
         }.getOrDefault("")
     }
 
     suspend fun scrape(rawUrl: String): ScrapedLinkResult = withContext(Dispatchers.IO) {
-        val trimmed = rawUrl.trim()
+        val trimmed = normalizeUrlIfBare(rawUrl)
         val uri = runCatching { URI(trimmed) }.getOrNull()
         if (uri == null || (uri.scheme != "http" && uri.scheme != "https")) {
-            return@withContext ScrapedLinkResult(trimmed, "", "", null)
+            return@withContext ScrapedLinkResult(rawUrl.trim(), "", "", null)
         }
 
         val store = inferStoreFromUrl(trimmed)
