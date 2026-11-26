@@ -56,6 +56,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -335,16 +336,24 @@ fun PeopleScreen(
                                     size = 44.dp
                                 )
                                 Column {
-                                    Text(person.name, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                                    val sub = buildList {
-                                        add(person.relationship)
-                                        if (ideasCount > 0) add("$ideasCount ideas")
-                                    }.joinToString(" • ")
                                     Text(
-                                        sub,
-                                        fontSize = 12.sp,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        person.name,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 16.sp,
+                                        maxLines = if (canReorder) 1 else Int.MAX_VALUE,
+                                        overflow = TextOverflow.Ellipsis
                                     )
+                                    if (!canReorder) {
+                                        val sub = buildList {
+                                            add(person.relationship)
+                                            if (ideasCount > 0) add("$ideasCount ideas")
+                                        }.joinToString(" • ")
+                                        Text(
+                                            sub,
+                                            fontSize = 12.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
                                 }
                             }
 
@@ -376,27 +385,27 @@ fun PeopleScreen(
                                     ) {
                                         Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = "Move Down")
                                     }
-                                }
-
-                                Column(horizontalAlignment = Alignment.End) {
-                                    if (person.budget > 0) {
-                                        Text(
-                                            "$${spent2026.toInt()} / $${person.budget.toInt()}",
-                                            fontWeight = FontWeight.ExtraBold,
-                                            fontSize = 14.sp
-                                        )
-                                        Text(
-                                            "Budget",
-                                            fontSize = 11.sp,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    } else {
-                                        Text(
-                                            "Profile →",
-                                            fontSize = 12.sp,
-                                            color = MaterialTheme.colorScheme.primary,
-                                            fontWeight = FontWeight.Bold
-                                        )
+                                } else {
+                                    Column(horizontalAlignment = Alignment.End) {
+                                        if (person.budget > 0) {
+                                            Text(
+                                                "$${spent2026.toInt()} / $${person.budget.toInt()}",
+                                                fontWeight = FontWeight.ExtraBold,
+                                                fontSize = 14.sp
+                                            )
+                                            Text(
+                                                "Budget",
+                                                fontSize = 11.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        } else {
+                                            Text(
+                                                "Profile →",
+                                                fontSize = 12.sp,
+                                                color = MaterialTheme.colorScheme.primary,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
                                     }
                                 }
                             }

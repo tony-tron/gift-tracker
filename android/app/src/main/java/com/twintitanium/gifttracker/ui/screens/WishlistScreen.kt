@@ -85,6 +85,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -356,7 +357,10 @@ fun WishlistScreen(
                         colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)
                     ) {
                     Column(
-                        modifier = Modifier.padding(16.dp),
+                        modifier = Modifier.padding(
+                            horizontal = 16.dp,
+                            vertical = if (canReorder) 10.dp else 16.dp
+                        ),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         if (isEditing) {
@@ -425,7 +429,7 @@ fun WishlistScreen(
                                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                         modifier = Modifier
                                             .dragHandle(dragDropState, wish.id, enabled = true)
-                                            .padding(end = 8.dp, top = 4.dp, bottom = 4.dp)
+                                            .padding(end = 10.dp, top = 6.dp, bottom = 6.dp)
                                     )
                                 }
 
@@ -433,9 +437,11 @@ fun WishlistScreen(
                                     Text(
                                         text = wish.title,
                                         style = MaterialTheme.typography.titleMedium,
-                                        textDecoration = if (wish.received) TextDecoration.LineThrough else null
+                                        textDecoration = if (wish.received) TextDecoration.LineThrough else null,
+                                        maxLines = if (canReorder) 1 else Int.MAX_VALUE,
+                                        overflow = TextOverflow.Ellipsis
                                     )
-                                    if (wish.received && (wish.receivedFrom.isNotBlank() || wish.receivedWhen.isNotBlank())) {
+                                    if (!canReorder && wish.received && (wish.receivedFrom.isNotBlank() || wish.receivedWhen.isNotBlank())) {
                                         Text(
                                             text = "✓ From ${wish.receivedFrom.ifBlank { "Family" }} (${wish.receivedWhen})",
                                             fontSize = 12.sp,
@@ -477,52 +483,52 @@ fun WishlistScreen(
                                         ) {
                                             Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = "Move Down")
                                         }
-                                    }
-
-                                    if (!wish.received) {
-                                        FilledTonalButton(
-                                            onClick = {
-                                                loggingWishId = if (isLogging) null else wish.id
-                                                fromInput = ""
-                                                whenInput = "Christmas 2026"
-                                            }
-                                        ) {
-                                            Icon(Icons.Rounded.Check, null, Modifier.size(15.dp))
-                                            Spacer(Modifier.width(4.dp))
-                                            Text("Received", fontSize = 12.sp)
-                                        }
                                     } else {
-                                        TextButton(
+                                        if (!wish.received) {
+                                            FilledTonalButton(
+                                                onClick = {
+                                                    loggingWishId = if (isLogging) null else wish.id
+                                                    fromInput = ""
+                                                    whenInput = "Christmas 2026"
+                                                }
+                                            ) {
+                                                Icon(Icons.Rounded.Check, null, Modifier.size(15.dp))
+                                                Spacer(Modifier.width(4.dp))
+                                                Text("Received", fontSize = 12.sp)
+                                            }
+                                        } else {
+                                            TextButton(
+                                                onClick = {
+                                                    viewModel.updateWish(
+                                                        wish.copy(received = false, receivedFrom = "", receivedWhen = "")
+                                                    )
+                                                }
+                                            ) {
+                                                Text("Undo")
+                                            }
+                                        }
+
+                                        IconButton(
                                             onClick = {
-                                                viewModel.updateWish(
-                                                    wish.copy(received = false, receivedFrom = "", receivedWhen = "")
-                                                )
+                                                editingWishId = wish.id
+                                                editTitle = wish.title
+                                                editUrl = wish.url
+                                                editNotes = wish.notes
+                                                loggingWishId = null
                                             }
                                         ) {
-                                            Text("Undo")
+                                            Icon(Icons.Rounded.Edit, contentDescription = "Edit wish idea")
                                         }
-                                    }
 
-                                    IconButton(
-                                        onClick = {
-                                            editingWishId = wish.id
-                                            editTitle = wish.title
-                                            editUrl = wish.url
-                                            editNotes = wish.notes
-                                            loggingWishId = null
+                                        IconButton(onClick = { viewModel.deleteWish(wish.id) }) {
+                                            Icon(Icons.Rounded.DeleteOutline, contentDescription = "Delete wish")
                                         }
-                                    ) {
-                                        Icon(Icons.Rounded.Edit, contentDescription = "Edit wish idea")
-                                    }
-
-                                    IconButton(onClick = { viewModel.deleteWish(wish.id) }) {
-                                        Icon(Icons.Rounded.DeleteOutline, contentDescription = "Delete wish")
                                     }
                                 }
                             }
 
                             // Subnotes display
-                            if (wish.notes.isNotBlank()) {
+                            if (!canReorder && wish.notes.isNotBlank()) {
                                 Surface(
                                     shape = RoundedCornerShape(10.dp),
                                     color = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -537,7 +543,7 @@ fun WishlistScreen(
                                 }
                             }
 
-                            if (wish.url.isNotBlank()) {
+                            if (!canReorder && wish.url.isNotBlank()) {
                                 AssistChip(
                                     onClick = { runCatching { uriHandler.openUri(wish.url) } },
                                     leadingIcon = { Icon(Icons.AutoMirrored.Rounded.OpenInNew, null, Modifier.size(15.dp)) },
@@ -545,7 +551,7 @@ fun WishlistScreen(
                                 )
                             }
 
-                            if (isLogging) {
+                            if (!canReorder && isLogging) {
                                 Column(
                                     modifier = Modifier.padding(top = 6.dp),
                                     verticalArrangement = Arrangement.spacedBy(8.dp)
