@@ -32,7 +32,13 @@ enum class NavTab(val label: String, val shortLabel: String) {
     EVENTS("Occasions", "Events"),
     IDEAS("Gift Ideas", "Ideas"),
     PEOPLE("People & Sizes", "People"),
-    WISHLIST("My Wishlist", "Me")
+    WISHLIST("Wishlists", "Lists")
+}
+
+enum class WishlistHubTab {
+    MINE,
+    INCOMING,
+    OUTBOUND
 }
 
 enum class SyncStatus {
@@ -341,12 +347,145 @@ data class SharedWishlistLink(
 }
 
 @Serializable
+data class SavedWishlist(
+    val id: String,
+    val title: String,
+    val ownerName: String = "",
+    val url: String = "",
+    val type: String = "external", // "live" | "external"
+    val shareId: String? = null,
+    val projectKey: String? = null,
+    val personId: String? = null,
+    val notes: String = "",
+    val createdAt: String = Instant.now().toString(),
+    val updatedAt: String = Instant.now().toString()
+) {
+    fun toFirestoreMap(): Map<String, Any?> = buildMap {
+        put("id", id)
+        put("title", title)
+        put("ownerName", ownerName)
+        put("url", url)
+        put("type", type)
+        if (!shareId.isNullOrBlank()) put("shareId", shareId)
+        if (!projectKey.isNullOrBlank()) put("projectKey", projectKey)
+        put("personId", personId)
+        put("notes", notes)
+        put("createdAt", createdAt)
+        put("updatedAt", updatedAt)
+    }
+
+    companion object {
+        fun fromFirestoreMap(map: Map<String, Any?>, fallbackId: String): SavedWishlist = SavedWishlist(
+            id = (map["id"] as? String)?.takeIf { it.isNotBlank() } ?: fallbackId,
+            title = (map["title"] as? String) ?: "Shared Wishlist",
+            ownerName = (map["ownerName"] as? String) ?: "",
+            url = (map["url"] as? String) ?: "",
+            type = (map["type"] as? String) ?: "external",
+            shareId = (map["shareId"] as? String)?.takeIf { it.isNotBlank() },
+            projectKey = (map["projectKey"] as? String)?.takeIf { it.isNotBlank() },
+            personId = (map["personId"] as? String)?.takeIf { it.isNotBlank() },
+            notes = (map["notes"] as? String) ?: "",
+            createdAt = (map["createdAt"] as? String) ?: "",
+            updatedAt = (map["updatedAt"] as? String) ?: ""
+        )
+    }
+}
+
+data class PublishedWishItem(
+    val id: String,
+    val title: String,
+    val url: String = "",
+    val notes: String = "",
+    val priority: String = "medium",
+    val order: Int = 0
+) {
+    companion object {
+        fun fromFirestoreMap(map: Map<*, *>, fallbackOrder: Int = 0): PublishedWishItem? {
+            val id = (map["id"] as? String)?.takeIf { it.isNotBlank() } ?: return null
+            val title = (map["title"] as? String)?.takeIf { it.isNotBlank() } ?: return null
+            return PublishedWishItem(
+                id = id,
+                title = title,
+                url = (map["url"] as? String) ?: "",
+                notes = (map["notes"] as? String) ?: "",
+                priority = (map["priority"] as? String) ?: "medium",
+                order = (map["order"] as? Number)?.toInt() ?: fallbackOrder
+            )
+        }
+    }
+}
+
+data class PublicSharedWishlistDoc(
+    val id: String,
+    val ownerUid: String,
+    val title: String,
+    val ownerName: String = "",
+    val items: List<PublishedWishItem> = emptyList(),
+    val createdAt: String = "",
+    val updatedAt: String = ""
+) {
+    companion object {
+        fun fromFirestoreMap(map: Map<String, Any?>, fallbackId: String): PublicSharedWishlistDoc {
+            val rawItems = (map["items"] as? List<*>) ?: emptyList<Any?>()
+            val parsedItems = rawItems.mapIndexedNotNull { idx, entry ->
+                (entry as? Map<*, *>)?.let { PublishedWishItem.fromFirestoreMap(it, idx) }
+            }.sortedBy { it.order }
+            return PublicSharedWishlistDoc(
+                id = (map["id"] as? String)?.takeIf { it.isNotBlank() } ?: fallbackId,
+                ownerUid = (map["ownerUid"] as? String) ?: "",
+                title = (map["title"] as? String) ?: "Gift Wishlist",
+                ownerName = (map["ownerName"] as? String) ?: "",
+                items = parsedItems,
+                createdAt = (map["createdAt"] as? String) ?: "",
+                updatedAt = (map["updatedAt"] as? String) ?: ""
+            )
+        }
+    }
+}
+
+data class SharedWishClaim(
+    val wishId: String,
+    val claimedBy: String,
+    val claimerToken: String = "",
+    val purchased: Boolean = false,
+    val status: String = "reserved", // researching | reserved | purchased
+    val researchers: List<String> = emptyList(),
+    val researcherTokens: List<String> = emptyList(),
+    val giverNote: String = "",
+    val claimedAt: String = Instant.now().toString(),
+    val updatedAt: String = Instant.now().toString()
+) {
+    companion object {
+        fun fromFirestoreMap(map: Map<String, Any?>, fallbackId: String): SharedWishClaim {
+            val purchased = (map["purchased"] as? Boolean) ?: false
+            val rawStatus = (map["status"] as? String)?.takeIf { it.isNotBlank() }
+                ?: if (purchased) "purchased" else "reserved"
+            val researchers = (map["researchers"] as? List<*>)?.mapNotNull { it as? String } ?: emptyList()
+            val researcherTokens = (map["researcherTokens"] as? List<*>)?.mapNotNull { it as? String } ?: emptyList()
+            return SharedWishClaim(
+                wishId = (map["wishId"] as? String)?.takeIf { it.isNotBlank() } ?: fallbackId,
+                claimedBy = (map["claimedBy"] as? String) ?: "Someone",
+                claimerToken = (map["claimerToken"] as? String) ?: "",
+                purchased = purchased,
+                status = rawStatus,
+                researchers = researchers,
+                researcherTokens = researcherTokens,
+                giverNote = (map["giverNote"] as? String) ?: "",
+                claimedAt = (map["claimedAt"] as? String) ?: "",
+                updatedAt = (map["updatedAt"] as? String) ?: ""
+            )
+        }
+    }
+}
+
+@Serializable
 data class GiftDataset(
     val people: List<Person> = emptyList(),
     val events: List<GiftEvent> = defaultEvents(),
     val gifts: List<GiftItem> = emptyList(),
     val wishes: List<WishItem> = emptyList(),
-    val sharedLinks: List<SharedWishlistLink> = emptyList()
+    val sharedLinks: List<SharedWishlistLink> = emptyList(),
+    val savedWishlists: List<SavedWishlist> = emptyList()
 ) {
     companion object {
         fun defaultEvents(): List<GiftEvent> = listOf(
@@ -377,7 +516,8 @@ data class GiftDataset(
             events = defaultEvents(),
             gifts = emptyList(),
             wishes = emptyList(),
-            sharedLinks = emptyList()
+            sharedLinks = emptyList(),
+            savedWishlists = emptyList()
         )
     }
 }

@@ -18,6 +18,7 @@ import {
   deletePublicSharedWishlistDoc,
   deleteRemoteDoc,
   encodeFirebasePairingToken,
+  fetchPublicWishlistOnce,
   generateShareId,
   getOrCreateClaimerToken,
   getSavedFirebaseConfig,
@@ -25,6 +26,7 @@ import {
   initFirebaseServices,
   initPublicViewerServices,
   observeAuth,
+  parseWishlistUrl,
   publishSharedWishlistDoc,
   saveRuntimeFirebaseConfig,
   signInQuickSync,
@@ -47,8 +49,10 @@ import type {
   GiftItem,
   NavTab,
   Person,
+  SavedWishlist,
   SharedWishlistLink,
   ThemeSeed,
+  WishlistHubTab,
   WishItem,
 } from '@/lib/types';
 
@@ -75,10 +79,16 @@ interface GiftStoreContextValue {
   gifts: GiftItem[];
   wishes: WishItem[];
   sharedLinks: SharedWishlistLink[];
+  savedWishlists: SavedWishlist[];
 
   // Navigation & Active selections
   activeTab: NavTab;
   setActiveTab: (tab: NavTab) => void;
+  wishlistSubTab: WishlistHubTab;
+  setWishlistSubTab: (sub: WishlistHubTab) => void;
+  selectedSavedWishlistId: string | null;
+  setSelectedSavedWishlistId: (id: string | null) => void;
+  openSavedWishlistInHub: (id: string) => void;
   selectedEventId: string;
   setSelectedEventId: (id: string) => void;
   selectedPersonId: string | null;
@@ -127,7 +137,7 @@ interface GiftStoreContextValue {
   updateEvent: (id: string, patch: Partial<GiftEvent>) => void;
   deleteEvent: (id: string) => void;
 
-  // Personal Wishlist & Live Group Links CRUD
+  // Personal Wishlist, Outbound Group Links & Incoming Saved Wishlists CRUD
   addWish: (input: Omit<WishItem, 'id'>) => WishItem;
   updateWish: (id: string, patch: Partial<WishItem>) => void;
   deleteWish: (id: string) => void;
@@ -145,6 +155,18 @@ interface GiftStoreContextValue {
     patch: Partial<Omit<SharedWishlistLink, 'id' | 'createdAt'>>
   ) => Promise<void>;
   deleteSharedWishlistLink: (id: string) => Promise<void>;
+  addSavedWishlist: (input: {
+    url: string;
+    title?: string;
+    ownerName?: string;
+    personId?: string | null;
+    notes?: string;
+  }) => Promise<SavedWishlist | null>;
+  updateSavedWishlist: (
+    id: string,
+    patch: Partial<Omit<SavedWishlist, 'id' | 'createdAt'>>
+  ) => void;
+  deleteSavedWishlist: (id: string) => void;
 
   // Reset & Backup
   resetData: () => void;
@@ -179,6 +201,7 @@ function readInitialDataset(): GiftDataset {
           gifts: parsed.gifts,
           wishes: [...parsed.wishes].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
           sharedLinks: parsed.sharedLinks ?? [],
+          savedWishlists: parsed.savedWishlists ?? [],
         };
       }
     }
@@ -217,6 +240,16 @@ export function GiftStoreProvider({ children }: { children: React.ReactNode }) {
     }
     return 'events';
   });
+
+  const [wishlistSubTab, setWishlistSubTab] = useState<WishlistHubTab>(() => {
+    if (typeof window !== 'undefined') {
+      const sub = new URLSearchParams(window.location.search).get('sub') as WishlistHubTab | null;
+      if (sub && ['mine', 'incoming', 'outbound'].includes(sub)) return sub;
+    }
+    return 'mine';
+  });
+
+  const [selectedSavedWishlistId, setSelectedSavedWishlistId] = useState<string | null>(null);
 
   const [selectedEventId, setSelectedEventId] = useState<string>(() => {
     if (typeof window !== 'undefined') {
@@ -392,6 +425,9 @@ export function GiftStoreProvider({ children }: { children: React.ReactNode }) {
           },
           onSharedLinks: (sharedLinks) => {
             setDataset((prev) => ({ ...prev, sharedLinks }));
+          },
+          onSavedWishlists: (savedWishlists) => {
+            setDataset((prev) => ({ ...prev, savedWishlists }));
           },
           onError: (err) => {
             setSyncError(err.message);
@@ -723,13 +759,27 @@ export function GiftStoreProvider({ children }: { children: React.ReactNode }) {
   const deletePerson = useCallback(
     (id: string) => {
       const target = datasetRef.current.people.find((p) => p.id === id);
+      const affectedSaved = (datasetRef.current.savedWishlists ?? []).filter(
+        (sw) => sw.personId === id
+      );
       setDataset((prev) => ({
         ...prev,
         people: prev.people.filter((p) => p.id !== id),
         gifts: prev.gifts.map((g) => (g.personId === id ? { ...g, personId: null } : g)),
+        savedWishlists: (prev.savedWishlists ?? []).map((sw) =>
+          sw.personId === id ? { ...sw, personId: null, updatedAt: new Date().toISOString() } : sw
+        ),
       }));
       if (firebaseUser) {
         void deleteRemoteDoc('people', id, firebaseUser.uid);
+        affectedSaved.forEach((sw) => {
+          void upsertRemoteDoc(
+            'saved_wishlists',
+            sw.id,
+            { ...sw, personId: null, updatedAt: new Date().toISOString() },
+            firebaseUser.uid
+          );
+        });
       }
       if (selectedPersonId === id) {
         const remaining = datasetRef.current.people.filter((p) => p.id !== id);
@@ -1031,9 +1081,192 @@ export function GiftStoreProvider({ children }: { children: React.ReactNode }) {
     [firebaseUser, showSnackbar]
   );
 
+  const openSavedWishlistInHub = useCallback((id: string) => {
+    setSelectedSavedWishlistId(id);
+    setWishlistSubTab('incoming');
+    setActiveTab('wishlist');
+  }, []);
+
+  const addSavedWishlist = useCallback(
+    async (input: {
+      url: string;
+      title?: string;
+      ownerName?: string;
+      personId?: string | null;
+      notes?: string;
+    }): Promise<SavedWishlist | null> => {
+      const parsed = parseWishlistUrl(input.url);
+      if (!parsed.normalizedUrl) {
+        showSnackbar('Please enter a valid wishlist link.');
+        return null;
+      }
+
+      if (parsed.type === 'live' && parsed.shareId) {
+        const ownMatch = (datasetRef.current.sharedLinks ?? []).find(
+          (l) => l.id === parsed.shareId
+        );
+        if (ownMatch) {
+          setWishlistSubTab('outbound');
+          setActiveTab('wishlist');
+          showSnackbar(`"${ownMatch.title}" is one of your own shared links!`);
+          return null;
+        }
+      }
+
+      const existing = (datasetRef.current.savedWishlists ?? []).find((sw) => {
+        if (parsed.type === 'live' && parsed.shareId && sw.shareId === parsed.shareId) {
+          return true;
+        }
+        return sw.url.trim().toLowerCase() === parsed.normalizedUrl.trim().toLowerCase();
+      });
+
+      const now = new Date().toISOString();
+      let resolvedTitle = (input.title || '').trim();
+      let resolvedOwner = (input.ownerName || '').trim();
+
+      if (parsed.type === 'live' && parsed.shareId && (!resolvedTitle || !resolvedOwner)) {
+        const remoteDoc = await fetchPublicWishlistOnce(parsed.shareId, parsed.projectKey);
+        if (remoteDoc) {
+          if (!resolvedTitle) resolvedTitle = remoteDoc.title || '';
+          if (!resolvedOwner) resolvedOwner = remoteDoc.ownerName || '';
+        }
+      }
+
+      let resolvedPersonId: string | null =
+        input.personId !== undefined ? input.personId : null;
+
+      if (input.personId === undefined && resolvedOwner) {
+        const matched = datasetRef.current.people.find(
+          (p) => p.name.trim().toLowerCase() === resolvedOwner.toLowerCase()
+        );
+        if (matched) resolvedPersonId = matched.id;
+      }
+
+      if (!resolvedOwner && resolvedPersonId) {
+        const linkedPerson = datasetRef.current.people.find((p) => p.id === resolvedPersonId);
+        if (linkedPerson) resolvedOwner = linkedPerson.name;
+      }
+
+      if (!resolvedTitle) {
+        resolvedTitle = resolvedOwner ? `${resolvedOwner}'s Wishlist` : 'Shared Wishlist';
+      }
+
+      if (existing) {
+        const updated: SavedWishlist = {
+          ...existing,
+          title: input.title?.trim() || existing.title || resolvedTitle,
+          ownerName: input.ownerName?.trim() || existing.ownerName || resolvedOwner,
+          personId: input.personId !== undefined ? input.personId : existing.personId ?? resolvedPersonId,
+          notes: input.notes !== undefined ? input.notes.trim() : existing.notes,
+          projectKey: parsed.projectKey || existing.projectKey,
+          updatedAt: now,
+        };
+        setDataset((prev) => ({
+          ...prev,
+          savedWishlists: (prev.savedWishlists ?? []).map((sw) =>
+            sw.id === existing.id ? updated : sw
+          ),
+        }));
+        if (firebaseUser) {
+          void upsertRemoteDoc('saved_wishlists', updated.id, updated, firebaseUser.uid);
+        }
+        setSelectedSavedWishlistId(updated.id);
+        showSnackbar(`Updated "${updated.title}" in Shared With Me`);
+        return updated;
+      }
+
+      const created: SavedWishlist = {
+        id: makeId('saved-wl'),
+        title: resolvedTitle,
+        ownerName: resolvedOwner,
+        url: parsed.normalizedUrl,
+        type: parsed.type,
+        shareId: parsed.shareId,
+        projectKey: parsed.projectKey,
+        personId: resolvedPersonId,
+        notes: (input.notes || '').trim(),
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      setDataset((prev) => ({
+        ...prev,
+        savedWishlists: [created, ...(prev.savedWishlists ?? [])],
+      }));
+      if (firebaseUser) {
+        void upsertRemoteDoc('saved_wishlists', created.id, created, firebaseUser.uid);
+      }
+      setSelectedSavedWishlistId(created.id);
+      showSnackbar(`Saved "${created.title}" to Shared With Me!`);
+      return created;
+    },
+    [firebaseUser, showSnackbar]
+  );
+
+  const updateSavedWishlist = useCallback(
+    (id: string, patch: Partial<Omit<SavedWishlist, 'id' | 'createdAt'>>) => {
+      const nextPatch: Partial<SavedWishlist> = {
+        ...patch,
+        updatedAt: new Date().toISOString(),
+      };
+      if (patch.url !== undefined) {
+        const parsed = parseWishlistUrl(patch.url);
+        nextPatch.url = parsed.normalizedUrl;
+        nextPatch.type = parsed.type;
+        nextPatch.shareId = parsed.shareId;
+        nextPatch.projectKey = parsed.projectKey;
+      }
+
+      setDataset((prev) => {
+        const nextSaved = (prev.savedWishlists ?? []).map((sw) => {
+          if (sw.id !== id) return sw;
+          const updated: SavedWishlist = { ...sw, ...nextPatch };
+          if (firebaseUser) {
+            void upsertRemoteDoc('saved_wishlists', id, updated, firebaseUser.uid);
+          }
+          return updated;
+        });
+        return { ...prev, savedWishlists: nextSaved };
+      });
+      showSnackbar('Updated saved wishlist');
+    },
+    [firebaseUser, showSnackbar]
+  );
+
+  const deleteSavedWishlist = useCallback(
+    (id: string) => {
+      const target = (datasetRef.current.savedWishlists ?? []).find((sw) => sw.id === id);
+      setDataset((prev) => ({
+        ...prev,
+        savedWishlists: (prev.savedWishlists ?? []).filter((sw) => sw.id !== id),
+      }));
+      if (firebaseUser) {
+        void deleteRemoteDoc('saved_wishlists', id, firebaseUser.uid);
+      }
+      if (selectedSavedWishlistId === id) {
+        const remaining = (datasetRef.current.savedWishlists ?? []).filter((sw) => sw.id !== id);
+        setSelectedSavedWishlistId(remaining[0]?.id ?? null);
+      }
+      if (target) {
+        showSnackbar(`Removed "${target.title}"`, 'Undo', () => {
+          setDataset((prev) => ({
+            ...prev,
+            savedWishlists: [target, ...(prev.savedWishlists ?? [])],
+          }));
+          if (firebaseUser) {
+            void upsertRemoteDoc('saved_wishlists', target.id, target, firebaseUser.uid);
+          }
+          setSelectedSavedWishlistId(target.id);
+        });
+      }
+    },
+    [firebaseUser, selectedSavedWishlistId, showSnackbar]
+  );
+
   // Reset to clean slate
   const resetData = useCallback(() => {
     const prevLinks = datasetRef.current.sharedLinks ?? [];
+    const prevSaved = datasetRef.current.savedWishlists ?? [];
     const knownWishIds = datasetRef.current.wishes.map((w) => w.id);
     setDataset(EMPTY_DATASET);
     if (typeof window !== 'undefined') {
@@ -1045,6 +1278,9 @@ export function GiftStoreProvider({ children }: { children: React.ReactNode }) {
         prevLinks.forEach((l) => {
           void deleteRemoteDoc('shared_links', l.id, firebaseUser.uid);
           void deletePublicSharedWishlistDoc(l.id, knownWishIds);
+        });
+        prevSaved.forEach((sw) => {
+          void deleteRemoteDoc('saved_wishlists', sw.id, firebaseUser.uid);
         });
         void uploadFullDatasetToFirestore(services.db, firebaseUser.uid, EMPTY_DATASET);
       }
@@ -1069,6 +1305,7 @@ export function GiftStoreProvider({ children }: { children: React.ReactNode }) {
           gifts: parsed.gifts,
           wishes: parsed.wishes,
           sharedLinks: parsed.sharedLinks ?? [],
+          savedWishlists: parsed.savedWishlists ?? [],
         };
         setDataset(clean);
         if (firebaseUser) {
@@ -1100,8 +1337,14 @@ export function GiftStoreProvider({ children }: { children: React.ReactNode }) {
       gifts: dataset.gifts,
       wishes: dataset.wishes,
       sharedLinks: dataset.sharedLinks ?? [],
+      savedWishlists: dataset.savedWishlists ?? [],
       activeTab,
       setActiveTab,
+      wishlistSubTab,
+      setWishlistSubTab,
+      selectedSavedWishlistId,
+      setSelectedSavedWishlistId,
+      openSavedWishlistInHub,
       selectedEventId,
       setSelectedEventId,
       selectedPersonId,
@@ -1141,6 +1384,9 @@ export function GiftStoreProvider({ children }: { children: React.ReactNode }) {
       createSharedWishlistLink,
       updateSharedWishlistLink,
       deleteSharedWishlistLink,
+      addSavedWishlist,
+      updateSavedWishlist,
+      deleteSavedWishlist,
       resetData,
       exportJsonBackup,
       importJsonBackup,
@@ -1151,6 +1397,9 @@ export function GiftStoreProvider({ children }: { children: React.ReactNode }) {
     [
       dataset,
       activeTab,
+      wishlistSubTab,
+      selectedSavedWishlistId,
+      openSavedWishlistInHub,
       selectedEventId,
       selectedPersonId,
       themeSeed,
@@ -1186,6 +1435,9 @@ export function GiftStoreProvider({ children }: { children: React.ReactNode }) {
       createSharedWishlistLink,
       updateSharedWishlistLink,
       deleteSharedWishlistLink,
+      addSavedWishlist,
+      updateSavedWishlist,
+      deleteSavedWishlist,
       resetData,
       exportJsonBackup,
       importJsonBackup,

@@ -21,6 +21,9 @@ import com.twintitanium.gifttracker.data.model.GiftDataset
 import com.twintitanium.gifttracker.data.model.GiftEvent
 import com.twintitanium.gifttracker.data.model.GiftItem
 import com.twintitanium.gifttracker.data.model.Person
+import com.twintitanium.gifttracker.data.model.PublicSharedWishlistDoc
+import com.twintitanium.gifttracker.data.model.SavedWishlist
+import com.twintitanium.gifttracker.data.model.SharedWishClaim
 import com.twintitanium.gifttracker.data.model.SharedWishlistLink
 import com.twintitanium.gifttracker.data.model.WishItem
 import java.time.Instant
@@ -274,6 +277,9 @@ class FirebaseSyncManager(private val appContext: Context) {
         dataset.sharedLinks.forEach { s ->
             ops += root.collection("shared_links").document(s.id) to s.toFirestoreMap()
         }
+        dataset.savedWishlists.forEach { sw ->
+            ops += root.collection("saved_wishlists").document(sw.id) to sw.toFirestoreMap()
+        }
 
         ops.chunked(400).forEach { chunk ->
             val batch = db.batch()
@@ -377,6 +383,371 @@ class FirebaseSyncManager(private val appContext: Context) {
         }
     }
 
+    fun resolvePublicViewerApp(projectKey: String?, primaryApp: FirebaseApp?): FirebaseApp? {
+        val cleanKey = projectKey?.trim()?.takeIf { it.isNotBlank() }
+        if (cleanKey != null) {
+            val keyCfg = decodePublicProjectKey(cleanKey)
+                ?: decodePairingToken(cleanKey)?.config
+            if (keyCfg != null) {
+                if (primaryApp != null && primaryApp.options.projectId == keyCfg.projectId) {
+                    return primaryApp
+                }
+                val appName = "public-viewer-${keyCfg.projectId}-${keyCfg.apiKey.takeLast(6)}"
+                val existing = FirebaseApp.getApps(appContext).firstOrNull { it.name == appName }
+                if (existing != null) return existing
+                return runCatching {
+                    val opts = FirebaseOptions.Builder()
+                        .setApiKey(keyCfg.apiKey)
+                        .setProjectId(keyCfg.projectId)
+                        .setApplicationId(
+                            keyCfg.applicationId.ifBlank { "1:000000000000:web:publicviewer" }
+                        )
+                        .build()
+                    FirebaseApp.initializeApp(appContext, opts, appName)
+                }.getOrNull() ?: primaryApp
+            }
+        }
+        return primaryApp
+    }
+
+    suspend fun fetchPublicWishlistOnce(
+        viewerApp: FirebaseApp,
+        shareId: String
+    ): PublicSharedWishlistDoc? = runCatching {
+        val snap = FirebaseFirestore.getInstance(viewerApp)
+            .collection("shared_wishlists")
+            .document(shareId)
+            .get()
+            .await()
+        val data = snap.data ?: return null
+        PublicSharedWishlistDoc.fromFirestoreMap(data, snap.id)
+    }.getOrNull()
+
+    fun subscribeToPublicWishlist(
+        viewerApp: FirebaseApp,
+        shareId: String,
+        onDoc: (PublicSharedWishlistDoc?) -> Unit,
+        onError: (Exception) -> Unit
+    ): ListenerRegistration {
+        val db = FirebaseFirestore.getInstance(viewerApp)
+        return db.collection("shared_wishlists")
+            .document(shareId)
+            .addSnapshotListener { snap, err ->
+                if (err != null) {
+                    onError(err)
+                    return@addSnapshotListener
+                }
+                if (snap == null || !snap.exists()) {
+                    onDoc(null)
+                    return@addSnapshotListener
+                }
+                val data = snap.data
+                if (data == null) {
+                    onDoc(null)
+                } else {
+                    onDoc(PublicSharedWishlistDoc.fromFirestoreMap(data, snap.id))
+                }
+            }
+    }
+
+    fun subscribeToPublicWishlistClaims(
+        viewerApp: FirebaseApp,
+        shareId: String,
+        onClaims: (Map<String, SharedWishClaim>) -> Unit,
+        onError: (Exception) -> Unit = {}
+    ): ListenerRegistration {
+        val db = FirebaseFirestore.getInstance(viewerApp)
+        return db.collection("shared_wishlists")
+            .document(shareId)
+            .collection("claims")
+            .addSnapshotListener { snap, err ->
+                if (err != null) {
+                    onError(err)
+                    return@addSnapshotListener
+                }
+                if (snap != null) {
+                    val map = buildMap<String, SharedWishClaim> {
+                        snap.documents.forEach { d ->
+                            val raw = d.data
+                            if (raw != null) {
+                                val parsed = SharedWishClaim.fromFirestoreMap(raw, d.id)
+                                put(d.id, parsed)
+                            }
+                        }
+                    }
+                    onClaims(map)
+                }
+            }
+    }
+
+    suspend fun claimPublicWishItem(
+        viewerApp: FirebaseApp,
+        shareId: String,
+        claim: SharedWishClaim
+    ): Pair<Boolean, String?> {
+        val db = FirebaseFirestore.getInstance(viewerApp)
+        val claimRef = db.collection("shared_wishlists")
+            .document(shareId)
+            .collection("claims")
+            .document(claim.wishId)
+
+        return db.runTransaction { tx ->
+            val snap = tx.get(claimRef)
+            if (snap.exists()) {
+                val existing = snap.data.orEmpty()
+                val existingStatus = existing["status"] as? String
+                val existingToken = existing["claimerToken"] as? String
+                if (existingStatus != "researching" &&
+                    !existingToken.isNullOrBlank() &&
+                    existingToken != claim.claimerToken
+                ) {
+                    val other = (existing["claimedBy"] as? String) ?: "Someone else"
+                    return@runTransaction false to other
+                }
+            }
+            val now = Instant.now().toString()
+            val cleanName = claim.claimedBy.trim().take(80)
+            val cleanStatus = claim.status.ifBlank { if (claim.purchased) "purchased" else "reserved" }
+            val payload = mapOf(
+                "wishId" to claim.wishId,
+                "claimedBy" to cleanName,
+                "claimerToken" to claim.claimerToken,
+                "purchased" to claim.purchased,
+                "status" to cleanStatus,
+                "researchers" to (claim.researchers.ifEmpty { listOf(cleanName) }),
+                "researcherTokens" to (claim.researcherTokens.ifEmpty { listOf(claim.claimerToken) }),
+                "giverNote" to claim.giverNote.trim(),
+                "claimedAt" to claim.claimedAt.ifBlank { now },
+                "updatedAt" to now
+            )
+            tx.set(claimRef, payload)
+            true to null
+        }.await()
+    }
+
+    suspend fun setWishResearching(
+        viewerApp: FirebaseApp,
+        shareId: String,
+        wishId: String,
+        researcherName: String,
+        researcherToken: String
+    ): Pair<Boolean, String?> {
+        val db = FirebaseFirestore.getInstance(viewerApp)
+        val claimRef = db.collection("shared_wishlists")
+            .document(shareId)
+            .collection("claims")
+            .document(wishId)
+
+        return db.runTransaction { tx ->
+            val snap = tx.get(claimRef)
+            val now = Instant.now().toString()
+            val cleanName = researcherName.trim().take(40)
+            if (snap.exists()) {
+                val existing = snap.data.orEmpty()
+                val status = existing["status"] as? String
+                val purchased = (existing["purchased"] as? Boolean) ?: false
+                val existingToken = existing["claimerToken"] as? String
+                if (status == "reserved" || status == "purchased" || purchased) {
+                    if (existingToken != researcherToken) {
+                        val other = (existing["claimedBy"] as? String) ?: "Someone else"
+                        return@runTransaction false to other
+                    }
+                }
+                val existingResearchers = (existing["researchers"] as? List<*>)
+                    ?.mapNotNull { it as? String }
+                    ?: listOfNotNull((existing["claimedBy"] as? String) ?: cleanName)
+                val existingTokens = (existing["researcherTokens"] as? List<*>)
+                    ?.mapNotNull { it as? String }
+                    ?: listOfNotNull(existingToken ?: researcherToken)
+
+                val nextResearchers = if (cleanName in existingResearchers) existingResearchers else existingResearchers + cleanName
+                val nextTokens = if (researcherToken in existingTokens) existingTokens else existingTokens + researcherToken
+                val joinedNames = nextResearchers.joinToString(", ").take(80).ifBlank { cleanName }
+
+                val payload = mapOf(
+                    "wishId" to wishId,
+                    "claimedBy" to joinedNames,
+                    "claimerToken" to researcherToken,
+                    "purchased" to false,
+                    "status" to "researching",
+                    "researchers" to nextResearchers,
+                    "researcherTokens" to nextTokens,
+                    "giverNote" to ((existing["giverNote"] as? String) ?: "").trim(),
+                    "claimedAt" to ((existing["claimedAt"] as? String)?.ifBlank { now } ?: now),
+                    "updatedAt" to now
+                )
+                tx.set(claimRef, payload)
+                return@runTransaction true to null
+            }
+
+            val payload = mapOf(
+                "wishId" to wishId,
+                "claimedBy" to cleanName.take(80),
+                "claimerToken" to researcherToken,
+                "purchased" to false,
+                "status" to "researching",
+                "researchers" to listOf(cleanName),
+                "researcherTokens" to listOf(researcherToken),
+                "giverNote" to "",
+                "claimedAt" to now,
+                "updatedAt" to now
+            )
+            tx.set(claimRef, payload)
+            true to null
+        }.await()
+    }
+
+    suspend fun updatePublicWishClaim(
+        viewerApp: FirebaseApp,
+        shareId: String,
+        wishId: String,
+        existing: SharedWishClaim,
+        purchased: Boolean? = null,
+        giverNote: String? = null,
+        claimedBy: String? = null,
+        status: String? = null
+    ) {
+        val db = FirebaseFirestore.getInstance(viewerApp)
+        val claimRef = db.collection("shared_wishlists")
+            .document(shareId)
+            .collection("claims")
+            .document(wishId)
+
+        val nextPurchased = purchased ?: existing.purchased
+        val nextStatus = status ?: if (nextPurchased) "purchased" else existing.status.ifBlank { "reserved" }
+        val payload = mapOf(
+            "wishId" to wishId,
+            "claimedBy" to (claimedBy ?: existing.claimedBy).trim().take(80),
+            "claimerToken" to existing.claimerToken,
+            "purchased" to nextPurchased,
+            "status" to nextStatus,
+            "researchers" to existing.researchers.ifEmpty { listOf(existing.claimedBy) },
+            "researcherTokens" to existing.researcherTokens.ifEmpty { listOf(existing.claimerToken) },
+            "giverNote" to (giverNote?.trim() ?: existing.giverNote),
+            "claimedAt" to existing.claimedAt,
+            "updatedAt" to Instant.now().toString()
+        )
+        claimRef.set(payload).await()
+    }
+
+    suspend fun unclaimOrStopResearchingPublicWishItem(
+        viewerApp: FirebaseApp,
+        shareId: String,
+        wishId: String,
+        claimerToken: String
+    ) {
+        val db = FirebaseFirestore.getInstance(viewerApp)
+        val claimRef = db.collection("shared_wishlists")
+            .document(shareId)
+            .collection("claims")
+            .document(wishId)
+
+        db.runTransaction { tx ->
+            val snap = tx.get(claimRef)
+            if (!snap.exists()) return@runTransaction
+            val existing = snap.data.orEmpty()
+            val status = existing["status"] as? String
+            if (status == "researching") {
+                val researchers = (existing["researchers"] as? List<*>)?.mapNotNull { it as? String }.orEmpty()
+                val tokens = (existing["researcherTokens"] as? List<*>)?.mapNotNull { it as? String }.orEmpty()
+                val remainingPairs = researchers.zip(tokens).filter { (_, tok) -> tok != claimerToken }
+                if (remainingPairs.isEmpty()) {
+                    tx.delete(claimRef)
+                } else {
+                    val remNames = remainingPairs.map { it.first }
+                    val remTokens = remainingPairs.map { it.second }
+                    val updated = existing.toMutableMap().apply {
+                        put("claimedBy", remNames.joinToString(", ").take(80))
+                        put("claimerToken", remTokens.firstOrNull() ?: "unknown")
+                        put("researchers", remNames)
+                        put("researcherTokens", remTokens)
+                        put("updatedAt", Instant.now().toString())
+                    }
+                    tx.set(claimRef, updated)
+                }
+                return@runTransaction
+            }
+            tx.delete(claimRef)
+        }.await()
+    }
+
+    suspend fun syncGiftBoughtStatusToWishlist(
+        viewerApp: FirebaseApp,
+        shareId: String,
+        wishId: String,
+        bought: Boolean,
+        giverName: String,
+        claimerToken: String
+    ): Pair<Boolean, String?> = runCatching {
+        val db = FirebaseFirestore.getInstance(viewerApp)
+        val claimRef = db.collection("shared_wishlists")
+            .document(shareId)
+            .collection("claims")
+            .document(wishId)
+        val cleanName = giverName.ifBlank { "Gift Giver" }.trim().take(80)
+
+        db.runTransaction { tx ->
+            val snap = tx.get(claimRef)
+            val existing = snap.data.orEmpty()
+            val existingStatus = existing["status"] as? String
+            val existingToken = existing["claimerToken"] as? String
+            val now = Instant.now().toString()
+
+            if (bought) {
+                if (snap.exists() &&
+                    existingStatus != "researching" &&
+                    !existingToken.isNullOrBlank() &&
+                    existingToken != claimerToken
+                ) {
+                    val other = (existing["claimedBy"] as? String) ?: "someone else"
+                    return@runTransaction false to "Already claimed by $other on the wishlist"
+                }
+                val researchers = (existing["researchers"] as? List<*>)?.mapNotNull { it as? String } ?: listOf(cleanName)
+                val tokens = (existing["researcherTokens"] as? List<*>)?.mapNotNull { it as? String } ?: listOf(claimerToken)
+                tx.set(
+                    claimRef,
+                    mapOf(
+                        "wishId" to wishId,
+                        "claimedBy" to cleanName,
+                        "claimerToken" to claimerToken,
+                        "purchased" to true,
+                        "status" to "purchased",
+                        "researchers" to researchers,
+                        "researcherTokens" to tokens,
+                        "giverNote" to ((existing["giverNote"] as? String) ?: "").trim(),
+                        "claimedAt" to ((existing["claimedAt"] as? String)?.ifBlank { now } ?: now),
+                        "updatedAt" to now
+                    )
+                )
+                true to "Marked as Purchased on the wishlist!"
+            } else {
+                if (snap.exists() &&
+                    existingStatus != "researching" &&
+                    !existingToken.isNullOrBlank() &&
+                    existingToken != claimerToken
+                ) {
+                    return@runTransaction false to null
+                }
+                tx.set(
+                    claimRef,
+                    mapOf(
+                        "wishId" to wishId,
+                        "claimedBy" to cleanName,
+                        "claimerToken" to claimerToken,
+                        "purchased" to false,
+                        "status" to "researching",
+                        "researchers" to listOf(cleanName),
+                        "researcherTokens" to listOf(claimerToken),
+                        "giverNote" to ((existing["giverNote"] as? String) ?: "").trim(),
+                        "claimedAt" to ((existing["claimedAt"] as? String)?.ifBlank { now } ?: now),
+                        "updatedAt" to now
+                    )
+                )
+                true to "Reverted to Researching on the wishlist"
+            }
+        }.await()
+    }.getOrElse { false to it.localizedMessage }
+
     fun subscribeToWorkspace(
         app: FirebaseApp,
         uid: String,
@@ -385,6 +756,7 @@ class FirebaseSyncManager(private val appContext: Context) {
         onGifts: (List<GiftItem>) -> Unit,
         onWishes: (List<WishItem>) -> Unit,
         onSharedLinks: (List<SharedWishlistLink>) -> Unit,
+        onSavedWishlists: (List<SavedWishlist>) -> Unit,
         onError: (Exception) -> Unit
     ) {
         clearWorkspaceListeners()
@@ -455,6 +827,19 @@ class FirebaseSyncManager(private val appContext: Context) {
                 onSharedLinks(items)
             }
         }
+
+        snapshotRegistrations += root.collection("saved_wishlists").addSnapshotListener { snap, err ->
+            if (err != null) {
+                onError(err)
+                return@addSnapshotListener
+            }
+            if (snap != null) {
+                val items = snap.documents
+                    .mapNotNull { d -> d.data?.let { SavedWishlist.fromFirestoreMap(it, d.id) } }
+                    .sortedByDescending { it.updatedAt.ifBlank { it.createdAt } }
+                onSavedWishlists(items)
+            }
+        }
     }
 
     private fun getResourceString(name: String): String? {
@@ -463,6 +848,54 @@ class FirebaseSyncManager(private val appContext: Context) {
     }
 
     companion object {
+        data class ParsedWishlistUrl(
+            val normalizedUrl: String,
+            val type: String, // "live" | "external"
+            val shareId: String? = null,
+            val projectKey: String? = null
+        )
+
+        fun parseWishlistUrl(rawInput: String): ParsedWishlistUrl {
+            var trimmed = rawInput.trim()
+            if (trimmed.isEmpty()) return ParsedWishlistUrl("", "external")
+            if (!Regex("^[a-zA-Z][a-zA-Z0-9+\\-.]*://").containsMatchIn(trimmed)) {
+                trimmed = "https://$trimmed"
+            }
+            return runCatching {
+                val uri = android.net.Uri.parse(trimmed)
+                val path = uri.path.orEmpty()
+                val match = Regex("/w/([A-Za-z0-9_-]+)").find(path)
+                if (match != null) {
+                    val shareId = android.net.Uri.decode(match.groupValues[1])
+                    val key = (uri.getQueryParameter("k") ?: uri.getQueryParameter("pair"))
+                        ?.trim()
+                        ?.takeIf { it.isNotBlank() }
+                    ParsedWishlistUrl(
+                        normalizedUrl = uri.toString(),
+                        type = "live",
+                        shareId = shareId,
+                        projectKey = key
+                    )
+                } else {
+                    ParsedWishlistUrl(normalizedUrl = uri.toString(), type = "external")
+                }
+            }.getOrDefault(ParsedWishlistUrl(normalizedUrl = trimmed, type = "external"))
+        }
+
+        fun decodePublicProjectKey(rawKey: String): FirebaseRuntimeConfig? = runCatching {
+            val normalized = rawKey.trim().replace('-', '+').replace('_', '/')
+            if (normalized.isEmpty()) return null
+            val padded = normalized + "=".repeat((4 - normalized.length % 4) % 4)
+            val decodedBytes = android.util.Base64.decode(padded, android.util.Base64.DEFAULT)
+            val obj = Json.parseToJsonElement(String(decodedBytes, Charsets.UTF_8)).jsonObject
+            val projectId = obj["p"]?.jsonPrimitive?.content?.trim()?.takeIf { it.isNotBlank() } ?: return null
+            val apiKey = obj["a"]?.jsonPrimitive?.content?.trim()?.takeIf { it.isNotBlank() } ?: return null
+            FirebaseRuntimeConfig(
+                apiKey = apiKey,
+                projectId = projectId,
+                applicationId = "1:000000000000:web:publicviewer"
+            )
+        }.getOrNull()
         /**
          * Returns the colon-separated uppercase SHA-1 fingerprint of the installed APK's signing certificate.
          */

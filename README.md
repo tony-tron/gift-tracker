@@ -23,8 +23,8 @@ gift-tracker/
   - Auto-adaptive Material 3 Expressive web interface for laptops, desktops, foldables, and mobile browsers.
   - Zero hardcoded personal data — clean privacy-first architecture out of the box.
 - **Unified Real-Time Cloud Sync & Collaborative Wishlist Sharing**:
-  - Both apps share the exact same Firestore workspace schema (`workspaces/{uid}/{people|events|gifts|wishes|shared_links}`), 1-scan QR/link device pairing, and interchangeable JSON backup format.
-  - **Multi-Group Live Wishlist Checklists (`/w/[shareId]`)**: Create separate unlisted checklist links for different groups (e.g., *Family*, *Friends*) where gift-givers claim items, mark purchases, and leave group notes in real time — while Firestore security rules strictly hide claim statuses from the wishlist owner.
+  - Both apps share the exact same Firestore workspace schema (`workspaces/{uid}/{people|events|gifts|wishes|shared_links|saved_wishlists}`), 1-scan QR/link device pairing, and interchangeable JSON backup format.
+  - **Multi-Group Live Wishlist Checklists (`/w/[shareId]`) & "Shared With Me" Hub**: Create separate unlisted checklist links for different groups (e.g., *Family*, *Friends*) where gift-givers claim items, mark purchases, and leave group notes in real time — while Firestore security rules strictly hide claim statuses from the wishlist owner — plus save incoming `/w/...` or external registry wishlists linked to recipients across mobile, foldable, and desktop layouts.
 
 ## Quick Start
 

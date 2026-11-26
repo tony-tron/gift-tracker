@@ -28,11 +28,18 @@ import type { SharedWishlistLink, WishItem } from '@/lib/types';
 interface ShareWishlistSheetProps {
   wishes: WishItem[];
   onClose: () => void;
+  initialTab?: 'create' | 'manage';
+  initialEditingLink?: SharedWishlistLink | null;
 }
 
 const OWNER_NAME_PREF_KEY = 'gift_tracker_owner_display_name_v1';
 
-export function ShareWishlistSheet({ wishes, onClose }: ShareWishlistSheetProps) {
+export function ShareWishlistSheet({
+  wishes,
+  onClose,
+  initialTab,
+  initialEditingLink,
+}: ShareWishlistSheetProps) {
   const router = useRouter();
   const {
     sharedLinks,
@@ -44,26 +51,44 @@ export function ShareWishlistSheet({ wishes, onClose }: ShareWishlistSheetProps)
     showSnackbar,
   } = useGiftStore();
 
-  const [tab, setTab] = useState<'create' | 'manage'>(() =>
-    wishes.length === 0 && sharedLinks.length > 0 ? 'manage' : 'create'
-  );
+  const [tab, setTab] = useState<'create' | 'manage'>(() => {
+    if (initialEditingLink) return 'create';
+    if (initialTab) return initialTab;
+    return wishes.length === 0 && sharedLinks.length > 0 ? 'manage' : 'create';
+  });
 
   // Create / Edit Group Link state
-  const [editingLinkId, setEditingLinkId] = useState<string | null>(null);
-  const [groupTitle, setGroupTitle] = useState('Family & Friends Wishlist');
+  const [editingLinkId, setEditingLinkId] = useState<string | null>(
+    () => initialEditingLink?.id ?? null
+  );
+  const [groupTitle, setGroupTitle] = useState(
+    () => initialEditingLink?.title || 'Family & Friends Wishlist'
+  );
   const [ownerName, setOwnerName] = useState<string>(() => {
+    if (initialEditingLink?.ownerName) return initialEditingLink.ownerName;
     if (typeof window !== 'undefined') {
       const saved = window.localStorage.getItem(OWNER_NAME_PREF_KEY);
       if (saved) return saved;
     }
     return firebaseUser?.displayName?.split(' ')[0] || '';
   });
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(
-    () => new Set(wishes.map((w) => w.id))
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => {
+    if (initialEditingLink) {
+      return initialEditingLink.includeAllActive
+        ? new Set(wishes.map((w) => w.id))
+        : new Set(initialEditingLink.wishIds.filter((id) => wishes.some((w) => w.id === id)));
+    }
+    return new Set(wishes.map((w) => w.id));
+  });
+  const [includeAllActive, setIncludeAllActive] = useState(
+    () => initialEditingLink?.includeAllActive ?? false
   );
-  const [includeAllActive, setIncludeAllActive] = useState(false);
-  const [includeUrls, setIncludeUrls] = useState(true);
-  const [includeNotes, setIncludeNotes] = useState(true);
+  const [includeUrls, setIncludeUrls] = useState(
+    () => initialEditingLink?.includeUrls ?? true
+  );
+  const [includeNotes, setIncludeNotes] = useState(
+    () => initialEditingLink?.includeNotes ?? true
+  );
   const [showPlainTextPreview, setShowPlainTextPreview] = useState(false);
   const [savingLink, setSavingLink] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);

@@ -49,7 +49,17 @@ function GiftComposerForm({
   editingGift,
   initialDefaults,
 }: Omit<GiftComposerSheetProps, 'open'>) {
-  const { people, events, addGift, updateGift, deleteGift, addWish, setActiveTab } = useGiftStore();
+  const {
+    people,
+    events,
+    addGift,
+    updateGift,
+    deleteGift,
+    addWish,
+    addSavedWishlist,
+    setWishlistSubTab,
+    setActiveTab,
+  } = useGiftStore();
 
   const [title, setTitle] = useState(() =>
     editingGift ? editingGift.title : initialDefaults?.title || ''
@@ -61,6 +71,9 @@ function GiftComposerForm({
     if (editingGift) {
       if (editingGift.eventId) return editingGift.eventId;
       return editingGift.saveForLater ? 'stockpile' : 'ideas';
+    }
+    if (initialDefaults?.url && /\/w\/[A-Za-z0-9_-]+/.test(initialDefaults.url)) {
+      return 'shared-wishlist';
     }
     return initialDefaults?.eventId ?? 'ideas';
   });
@@ -90,6 +103,9 @@ function GiftComposerForm({
   const handleAutoFillFromUrl = async (targetUrl?: string) => {
     const linkToFetch = (targetUrl ?? url).trim();
     if (!linkToFetch) return;
+    if (!editingGift && /\/w\/[A-Za-z0-9_-]+/.test(linkToFetch)) {
+      setDestination('shared-wishlist');
+    }
     setScraping(true);
     try {
       const res = await fetch(`/api/scrape-link?url=${encodeURIComponent(linkToFetch)}`);
@@ -126,7 +142,22 @@ function GiftComposerForm({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title.trim()) return;
+    if (destination !== 'shared-wishlist' && !title.trim()) return;
+
+    if (!editingGift && destination === 'shared-wishlist') {
+      if (!url.trim()) return;
+      void addSavedWishlist({
+        url: url.trim(),
+        title: title.trim(),
+        personId: personId || null,
+        notes: notes.trim(),
+      }).then(() => {
+        setWishlistSubTab('incoming');
+        setActiveTab('wishlist');
+        onClose();
+      });
+      return;
+    }
 
     if (!editingGift && destination === 'wishlist') {
       addWish({
@@ -138,6 +169,7 @@ function GiftComposerForm({
         receivedWhen: '',
         priority: 'medium',
       });
+      setWishlistSubTab('mine');
       setActiveTab('wishlist');
       onClose();
       return;
@@ -240,15 +272,19 @@ function GiftComposerForm({
 
           <div>
             <label className="m3-field-label" htmlFor="gift-title-input">
-              Gift Name *
+              {destination === 'shared-wishlist' ? 'Wishlist Title (Optional — auto-filled for /w/ links)' : 'Gift Name *'}
             </label>
             <input
               id="gift-title-input"
               type="text"
-              required
+              required={destination !== 'shared-wishlist'}
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="e.g., Cotopaxi Water Bottle Bag, Super Mario Wonder..."
+              placeholder={
+                destination === 'shared-wishlist'
+                  ? "e.g., Jordan's Holiday List"
+                  : 'e.g., Cotopaxi Water Bottle Bag, Super Mario Wonder...'
+              }
               className="m3-input"
             />
           </div>
@@ -263,7 +299,7 @@ function GiftComposerForm({
             {destination !== 'wishlist' && (
               <div>
                 <label className="m3-field-label" htmlFor="gift-person-select">
-                  Recipient
+                  {destination === 'shared-wishlist' ? 'Link to Person' : 'Recipient'}
                 </label>
                 <select
                   id="gift-person-select"
@@ -271,7 +307,11 @@ function GiftComposerForm({
                   onChange={(e) => setPersonId(e.target.value)}
                   className="m3-select"
                 >
-                  <option value="">Not sure who (General Pool)</option>
+                  <option value="">
+                    {destination === 'shared-wishlist'
+                      ? 'Unlinked (or auto-match owner)'
+                      : 'Not sure who (General Pool)'}
+                  </option>
                   {people.map((p) => (
                     <option key={p.id} value={p.id}>
                       {p.name} {p.budget > 0 ? `($${p.budget} budget)` : ''}
@@ -293,6 +333,9 @@ function GiftComposerForm({
               >
                 <option value="ideas">💡 Ideas Backlog</option>
                 {!editingGift && <option value="wishlist">⭐ My Personal Wishlist</option>}
+                {!editingGift && (
+                  <option value="shared-wishlist">📥 Shared With Me (Someone&rsquo;s Wishlist)</option>
+                )}
                 <option value="stockpile">📦 Bought & Saved for Later</option>
                 <optgroup label="Events & Occasions">
                   {events.map((ev) => (
@@ -305,7 +348,7 @@ function GiftComposerForm({
             </div>
           </div>
 
-          {destination !== 'wishlist' && (
+          {destination !== 'wishlist' && destination !== 'shared-wishlist' && (
             <>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                 <div>
@@ -368,7 +411,7 @@ function GiftComposerForm({
             />
           </div>
 
-          {destination !== 'wishlist' && (
+          {destination !== 'wishlist' && destination !== 'shared-wishlist' && (
             <div>
               <span className="m3-field-label">Fulfillment Progress</span>
               <div className="m3-connected-group">

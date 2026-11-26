@@ -89,6 +89,7 @@ import com.twintitanium.gifttracker.ui.GiftTrackerViewModel
 import com.twintitanium.gifttracker.ui.sheets.GiftComposerSheet
 import com.twintitanium.gifttracker.ui.sheets.MoveToEventSheet
 import com.twintitanium.gifttracker.ui.sheets.PersonEditorSheet
+import com.twintitanium.gifttracker.ui.sheets.SaveWishlistSheet
 import com.twintitanium.gifttracker.ui.sheets.SettingsSheet
 
 private data class NavDestination(
@@ -200,7 +201,7 @@ fun GiftTrackerRoot(
         }
         NavTab.IDEAS -> "Gift Ideas & Stash"
         NavTab.PEOPLE -> "People & Sizes"
-        NavTab.WISHLIST -> "My Wishlist"
+        NavTab.WISHLIST -> "Wishlists"
     }
 
     val isSynced = cloudState.syncStatus == SyncStatus.SYNCED
@@ -240,6 +241,7 @@ fun GiftTrackerRoot(
                             uiState.composerPreset != null -> { viewModel.closeGiftComposer(); true }
                             uiState.movingGift != null -> { viewModel.closeMoveGiftSheet(); true }
                             uiState.isPersonSheetOpen -> { viewModel.closePersonEditor(); true }
+                            uiState.isSaveWishlistSheetOpen -> { viewModel.closeSaveWishlistSheet(); true }
                             uiState.isSettingsOpen -> { viewModel.closeSettings(); true }
                             else -> { escapeTick++; false }
                         }
@@ -559,6 +561,16 @@ fun GiftTrackerRoot(
             editingPerson = uiState.editingPerson,
             viewModel = viewModel,
             onDismiss = { viewModel.closePersonEditor() }
+        )
+    }
+
+    if (uiState.isSaveWishlistSheetOpen) {
+        SaveWishlistSheet(
+            editingWishlist = uiState.editingSavedWishlist,
+            defaultPersonId = uiState.saveWishlistDefaultPersonId,
+            defaultUrl = uiState.saveWishlistDefaultUrl,
+            viewModel = viewModel,
+            onDismiss = { viewModel.closeSaveWishlistSheet() }
         )
     }
 

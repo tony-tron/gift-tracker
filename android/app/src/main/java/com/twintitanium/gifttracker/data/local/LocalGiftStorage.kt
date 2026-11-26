@@ -25,7 +25,9 @@ data class UserPreferences(
     val selectedEventId: String = "2026-christmas",
     val runtimeFirebaseConfig: FirebaseRuntimeConfig? = null,
     val webAppUrl: String? = null,
-    val ownerDisplayName: String? = null
+    val ownerDisplayName: String? = null,
+    val giverDisplayName: String? = null,
+    val claimerToken: String = ""
 )
 
 class LocalGiftStorage(private val context: Context) {
@@ -61,7 +63,9 @@ class LocalGiftStorage(private val context: Context) {
             selectedEventId = prefs[KEY_SELECTED_EVENT] ?: "2026-christmas",
             runtimeFirebaseConfig = fbCfg,
             webAppUrl = prefs[KEY_WEB_APP_URL]?.takeIf { it.isNotBlank() },
-            ownerDisplayName = prefs[KEY_OWNER_DISPLAY_NAME]?.takeIf { it.isNotBlank() }
+            ownerDisplayName = prefs[KEY_OWNER_DISPLAY_NAME]?.takeIf { it.isNotBlank() },
+            giverDisplayName = prefs[KEY_GIVER_DISPLAY_NAME]?.takeIf { it.isNotBlank() },
+            claimerToken = prefs[KEY_CLAIMER_TOKEN].orEmpty()
         )
     }
 
@@ -135,6 +139,32 @@ class LocalGiftStorage(private val context: Context) {
         }
     }
 
+    suspend fun setGiverDisplayName(name: String?) {
+        context.appDataStore.edit { prefs ->
+            val clean = name?.trim()
+            if (clean.isNullOrBlank()) {
+                prefs.remove(KEY_GIVER_DISPLAY_NAME)
+            } else {
+                prefs[KEY_GIVER_DISPLAY_NAME] = clean
+            }
+        }
+    }
+
+    suspend fun ensureClaimerToken(): String {
+        var resolved = ""
+        context.appDataStore.edit { prefs ->
+            val existing = prefs[KEY_CLAIMER_TOKEN]?.takeIf { it.isNotBlank() }
+            if (existing != null) {
+                resolved = existing
+            } else {
+                val created = com.twintitanium.gifttracker.data.model.IdGenerator.generate("giver")
+                prefs[KEY_CLAIMER_TOKEN] = created
+                resolved = created
+            }
+        }
+        return resolved
+    }
+
     companion object {
         const val DATASET_FILENAME = "gift_tracker_dataset_v1.json"
 
@@ -144,6 +174,8 @@ class LocalGiftStorage(private val context: Context) {
         private val KEY_FIREBASE_CONFIG = stringPreferencesKey("firebase_runtime_config")
         private val KEY_WEB_APP_URL = stringPreferencesKey("web_app_url")
         private val KEY_OWNER_DISPLAY_NAME = stringPreferencesKey("owner_display_name")
+        private val KEY_GIVER_DISPLAY_NAME = stringPreferencesKey("giver_display_name")
+        private val KEY_CLAIMER_TOKEN = stringPreferencesKey("claimer_token")
 
         /**
          * Fast helper also used by the Glance AppWidget process/coroutine to render the latest snapshot.
@@ -158,7 +190,10 @@ class LocalGiftStorage(private val context: Context) {
                     people = decoded.people.sortedBy { it.order },
                     events = decoded.events.ifEmpty { GiftDataset.defaultEvents() },
                     wishes = decoded.wishes.sortedBy { it.order },
-                    sharedLinks = decoded.sharedLinks.sortedByDescending { it.createdAt }
+                    sharedLinks = decoded.sharedLinks.sortedByDescending { it.createdAt },
+                    savedWishlists = decoded.savedWishlists.sortedByDescending {
+                        it.updatedAt.ifBlank { it.createdAt }
+                    }
                 )
             }.getOrDefault(GiftDataset.EMPTY)
         }

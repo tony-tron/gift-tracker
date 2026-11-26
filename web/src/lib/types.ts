@@ -121,12 +121,27 @@ export interface SharedWishClaim {
   updatedAt?: string;
 }
 
+export interface SavedWishlist {
+  id: string;
+  title: string;
+  ownerName: string;
+  url: string;
+  type: 'live' | 'external';
+  shareId?: string;
+  projectKey?: string;
+  personId: string | null;
+  notes: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface GiftDataset {
   people: Person[];
   events: GiftEvent[];
   gifts: GiftItem[];
   wishes: WishItem[];
   sharedLinks?: SharedWishlistLink[];
+  savedWishlists?: SavedWishlist[];
 }
 
 export interface FirebaseClientConfig {
@@ -140,3 +155,5 @@ export interface FirebaseClientConfig {
 }
 
 export type NavTab = 'events' | 'ideas' | 'people' | 'wishlist';
+
+export type WishlistHubTab = 'mine' | 'incoming' | 'outbound';

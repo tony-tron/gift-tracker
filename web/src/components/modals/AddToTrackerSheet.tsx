@@ -11,6 +11,7 @@ interface AddToTrackerSheetProps {
   onClose: () => void;
   wish: PublishedWishItem;
   wishlistOwnerName?: string;
+  preferredPersonId?: string | null;
   shareId: string;
   fallbackKey?: string | null;
   giverName: string;
@@ -24,6 +25,7 @@ export function AddToTrackerSheet({
   onClose,
   wish,
   wishlistOwnerName,
+  preferredPersonId,
   shareId,
   fallbackKey,
   giverName,
@@ -35,12 +37,16 @@ export function AddToTrackerSheet({
 
   const ownerNameClean = (wishlistOwnerName || '').trim() || 'Wishlist Owner';
 
-  // Check if owner already exists in people
+  // Check if preferredPersonId or owner already exists in people
   const matchedPerson = useMemo(() => {
+    if (preferredPersonId) {
+      const explicit = people.find((p) => p.id === preferredPersonId);
+      if (explicit) return explicit;
+    }
     return people.find(
       (p) => p.name.trim().toLowerCase() === ownerNameClean.toLowerCase()
     );
-  }, [people, ownerNameClean]);
+  }, [people, ownerNameClean, preferredPersonId]);
 
   const [mode, setMode] = useState<'create-owner' | 'pick-existing' | 'unassigned'>(() => {
     if (matchedPerson) return 'pick-existing';

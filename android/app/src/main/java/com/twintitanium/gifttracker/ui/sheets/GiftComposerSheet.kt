@@ -197,6 +197,11 @@ fun GiftComposerSheet(
                             onClick = { destination = "wishlist" },
                             label = { Text("⭐ My Wishlist") }
                         )
+                        FilterChip(
+                            selected = destination == "shared-wishlist",
+                            onClick = { destination = "shared-wishlist" },
+                            label = { Text("📥 Shared With Me") }
+                        )
                     }
                     FilterChip(
                         selected = destination == "stockpile",
@@ -216,7 +221,10 @@ fun GiftComposerSheet(
             if (destination != "wishlist") {
                 // Recipient Selector
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("Recipient", style = MaterialTheme.typography.labelLarge)
+                    Text(
+                        if (destination == "shared-wishlist") "Link to Person" else "Recipient",
+                        style = MaterialTheme.typography.labelLarge
+                    )
                     FlowRow(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -225,7 +233,12 @@ fun GiftComposerSheet(
                         FilterChip(
                             selected = personId == null,
                             onClick = { personId = null },
-                            label = { Text("🎯 Not sure who") }
+                            label = {
+                                Text(
+                                    if (destination == "shared-wishlist") "Unlinked / Auto"
+                                    else "🎯 Not sure who"
+                                )
+                            }
                         )
                         dataset.people.forEach { p ->
                             FilterChip(
@@ -237,7 +250,8 @@ fun GiftComposerSheet(
                     }
                 }
 
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                if (destination != "shared-wishlist") {
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     OutlinedTextField(
                         value = costStr,
                         onValueChange = { costStr = it },
@@ -276,13 +290,14 @@ fun GiftComposerSheet(
                     )
                 }
 
-                OutlinedTextField(
-                    value = tracking,
-                    onValueChange = { tracking = it },
-                    label = { Text("Order / Tracking Note (optional)") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
+                    OutlinedTextField(
+                        value = tracking,
+                        onValueChange = { tracking = it },
+                        label = { Text("Order / Tracking Note (optional)") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
             }
 
             OutlinedTextField(
@@ -303,9 +318,20 @@ fun GiftComposerSheet(
                 TextButton(onClick = onDismiss) { Text("Cancel") }
                 Spacer(Modifier.width(8.dp))
                 Button(
-                    enabled = title.isNotBlank(),
+                    enabled = if (destination == "shared-wishlist") url.isNotBlank() else title.isNotBlank(),
                     onClick = {
-                        if (editing == null && destination == "wishlist") {
+                        if (editing == null && destination == "shared-wishlist") {
+                            viewModel.saveIncomingWishlist(
+                                editing = null,
+                                url = url.trim(),
+                                title = title.trim(),
+                                ownerName = "",
+                                personMode = if (personId != null) "existing" else "auto",
+                                selectedPersonId = personId,
+                                notes = notes.trim(),
+                                navigateToHub = true
+                            )
+                        } else if (editing == null && destination == "wishlist") {
                             viewModel.saveSharedWish(
                                 title = title.trim(),
                                 url = url.trim(),
@@ -341,6 +367,7 @@ fun GiftComposerSheet(
                     Text(
                         when {
                             editing != null -> "Save Changes"
+                            destination == "shared-wishlist" -> "Save Shared Wishlist"
                             destination == "wishlist" -> "Add to Wishlist"
                             else -> "Save Gift"
                         }

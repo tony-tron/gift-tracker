@@ -10,12 +10,19 @@ import com.twintitanium.gifttracker.data.model.FirebaseRuntimeConfig
 import com.twintitanium.gifttracker.data.model.GiftItem
 import com.twintitanium.gifttracker.data.model.NavTab
 import com.twintitanium.gifttracker.data.model.Person
+import com.twintitanium.gifttracker.data.model.PublicSharedWishlistDoc
+import com.twintitanium.gifttracker.data.model.PublishedWishItem
+import com.twintitanium.gifttracker.data.model.SavedWishlist
+import com.twintitanium.gifttracker.data.model.SharedWishClaim
 import com.twintitanium.gifttracker.data.model.SharedWishlistLink
 import com.twintitanium.gifttracker.data.model.ThemeSeed
+import com.twintitanium.gifttracker.data.model.WishlistHubTab
 import com.twintitanium.gifttracker.data.model.WishItem
+import com.twintitanium.gifttracker.data.remote.FirebaseSyncManager
 import com.twintitanium.gifttracker.data.remote.LinkScraper
 import com.twintitanium.gifttracker.data.remote.ScrapedLinkResult
 import com.twintitanium.gifttracker.data.repository.GiftRepository
+import java.time.Instant
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -43,11 +50,17 @@ data class SnackbarEvent(
 
 data class AppUiState(
     val activeTab: NavTab = NavTab.EVENTS,
+    val wishlistSubTab: WishlistHubTab = WishlistHubTab.MINE,
+    val selectedSavedWishlistId: String? = null,
     val selectedPersonId: String? = null,
     val composerPreset: GiftComposerPreset? = null,
     val movingGift: GiftItem? = null,
     val editingPerson: Person? = null,
     val isPersonSheetOpen: Boolean = false,
+    val isSaveWishlistSheetOpen: Boolean = false,
+    val editingSavedWishlist: SavedWishlist? = null,
+    val saveWishlistDefaultPersonId: String? = null,
+    val saveWishlistDefaultUrl: String = "",
     val isSettingsOpen: Boolean = false
 )
 
@@ -73,6 +86,50 @@ class GiftTrackerViewModel(application: Application) : AndroidViewModel(applicat
         _uiState.update { it.copy(activeTab = tab) }
     }
 
+    fun setWishlistSubTab(sub: WishlistHubTab) {
+        _uiState.update { it.copy(wishlistSubTab = sub) }
+    }
+
+    fun selectSavedWishlist(id: String?) {
+        _uiState.update { it.copy(selectedSavedWishlistId = id) }
+    }
+
+    fun openSavedWishlistInHub(id: String) {
+        _uiState.update {
+            it.copy(
+                activeTab = NavTab.WISHLIST,
+                wishlistSubTab = WishlistHubTab.INCOMING,
+                selectedSavedWishlistId = id
+            )
+        }
+    }
+
+    fun openSaveWishlistSheet(
+        editing: SavedWishlist? = null,
+        defaultPersonId: String? = null,
+        defaultUrl: String = ""
+    ) {
+        _uiState.update {
+            it.copy(
+                isSaveWishlistSheetOpen = true,
+                editingSavedWishlist = editing,
+                saveWishlistDefaultPersonId = defaultPersonId,
+                saveWishlistDefaultUrl = defaultUrl
+            )
+        }
+    }
+
+    fun closeSaveWishlistSheet() {
+        _uiState.update {
+            it.copy(
+                isSaveWishlistSheetOpen = false,
+                editingSavedWishlist = null,
+                saveWishlistDefaultPersonId = null,
+                saveWishlistDefaultUrl = ""
+            )
+        }
+    }
+
     fun selectEvent(eventId: String) {
         viewModelScope.launch { repository.setSelectedEventId(eventId) }
     }
@@ -81,7 +138,11 @@ class GiftTrackerViewModel(application: Application) : AndroidViewModel(applicat
         _uiState.update { it.copy(selectedPersonId = personId) }
     }
 
-    fun openNewGiftComposer(personId: String? = null, eventId: String? = null) {
+    fun openNewGiftComposer(
+        personId: String? = null,
+        eventId: String? = null,
+        initialUrl: String = ""
+    ) {
         val resolvedEvent = eventId ?: if (_uiState.value.activeTab == NavTab.EVENTS) {
             val sel = preferences.value.selectedEventId
             if (sel == "all:active" || sel == "year:2026") {
@@ -94,7 +155,8 @@ class GiftTrackerViewModel(application: Application) : AndroidViewModel(applicat
             it.copy(
                 composerPreset = GiftComposerPreset(
                     initialPersonId = personId,
-                    initialEventId = resolvedEvent
+                    initialEventId = resolvedEvent,
+                    initialUrl = initialUrl
                 )
             )
         }
@@ -110,6 +172,19 @@ class GiftTrackerViewModel(application: Application) : AndroidViewModel(applicat
 
     fun handleIncomingShare(sharedText: String?, sharedSubject: String?) {
         val (url, fallbackTitle) = LinkScraper.parseSharedText(sharedText, sharedSubject)
+        if (url.isNotBlank() && FirebaseSyncManager.parseWishlistUrl(url).type == "live") {
+            _uiState.update {
+                it.copy(
+                    activeTab = NavTab.WISHLIST,
+                    wishlistSubTab = WishlistHubTab.INCOMING,
+                    isSaveWishlistSheetOpen = true,
+                    editingSavedWishlist = null,
+                    saveWishlistDefaultPersonId = null,
+                    saveWishlistDefaultUrl = url
+                )
+            }
+            return
+        }
         val store = if (url.isNotBlank()) LinkScraper.inferStoreFromUrl(url) else ""
         _uiState.update {
             it.copy(
@@ -155,7 +230,13 @@ class GiftTrackerViewModel(application: Application) : AndroidViewModel(applicat
 
     fun saveSharedWish(title: String, url: String, notes: String) {
         repository.addWish(title = title, url = url, notes = notes)
-        _uiState.update { it.copy(activeTab = NavTab.WISHLIST, composerPreset = null) }
+        _uiState.update {
+            it.copy(
+                activeTab = NavTab.WISHLIST,
+                wishlistSubTab = WishlistHubTab.MINE,
+                composerPreset = null
+            )
+        }
         showMessage("Added \"${title.trim()}\" to My Wishlist")
     }
 
@@ -168,7 +249,7 @@ class GiftTrackerViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     fun toggleGiftStatus(id: String, field: String) {
-        repository.toggleGiftStatus(id, field)
+        repository.toggleGiftStatus(id, field) { msg -> showMessage(msg) }
     }
 
     fun openMoveGiftSheet(gift: GiftItem) {
@@ -339,6 +420,340 @@ class GiftTrackerViewModel(application: Application) : AndroidViewModel(applicat
             repository.deleteSharedWishlistLink(link.id)
                 .onSuccess { showMessage("Revoked link \"${link.title}\"") }
                 .onFailure { err -> showMessage(err.localizedMessage ?: "Failed to revoke link") }
+        }
+    }
+
+    // Incoming Saved Wishlists (Shared With Me) & Live Claims
+    fun setGiverDisplayName(name: String?) {
+        viewModelScope.launch { repository.setGiverDisplayName(name) }
+    }
+
+    suspend fun fetchPublicWishlistMetadata(rawUrl: String): PublicSharedWishlistDoc? {
+        val parsed = FirebaseSyncManager.parseWishlistUrl(rawUrl)
+        if (parsed.type != "live" || parsed.shareId.isNullOrBlank()) return null
+        val (viewerApp, _) = repository.resolveViewerAppAndUid(parsed.projectKey)
+        if (viewerApp == null) return null
+        return repository.firebaseManager.fetchPublicWishlistOnce(viewerApp, parsed.shareId)
+    }
+
+    fun saveIncomingWishlist(
+        editing: SavedWishlist?,
+        url: String,
+        title: String,
+        ownerName: String,
+        personMode: String, // "existing" | "create" | "unlinked"
+        selectedPersonId: String?,
+        notes: String,
+        navigateToHub: Boolean = false,
+        onFinished: () -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            var resolvedPersonId: String? = null
+            val cleanOwner = ownerName.trim()
+            if (personMode == "existing" && !selectedPersonId.isNullOrBlank()) {
+                resolvedPersonId = selectedPersonId
+            } else if (personMode == "create") {
+                val createName = cleanOwner.ifBlank {
+                    title.substringBefore("'").trim().ifBlank { "Friend" }
+                }
+                val createdPerson = repository.addPerson(
+                    name = createName,
+                    budget = 0.0,
+                    relationship = "Family & Close Circle",
+                    birthday = null,
+                    sizes = ClothingSizes(),
+                    notes = "",
+                    avatarShape = null,
+                    avatarTone = null
+                )
+                resolvedPersonId = createdPerson.id
+            }
+
+            if (editing != null) {
+                val resolvedTitle = title.trim().ifBlank { editing.title }
+                val linkedName = dataset.value.people.firstOrNull { it.id == resolvedPersonId }?.name.orEmpty()
+                repository.updateSavedWishlist(
+                    editing.copy(
+                        url = url.trim(),
+                        title = resolvedTitle,
+                        ownerName = cleanOwner.ifBlank { linkedName.ifBlank { editing.ownerName } },
+                        personId = resolvedPersonId,
+                        notes = notes.trim()
+                    )
+                )
+                showMessage("Updated \"$resolvedTitle\"")
+            } else {
+                val outcome = repository.saveIncomingWishlist(
+                    rawUrl = url.trim(),
+                    title = title.trim(),
+                    ownerName = cleanOwner,
+                    personId = resolvedPersonId,
+                    personExplicit = personMode != "auto",
+                    notes = notes.trim()
+                )
+                when {
+                    outcome.wasOwnLink -> {
+                        _uiState.update {
+                            it.copy(
+                                activeTab = NavTab.WISHLIST,
+                                wishlistSubTab = WishlistHubTab.OUTBOUND,
+                                composerPreset = null
+                            )
+                        }
+                        showMessage("That's one of your own shared links!")
+                    }
+                    outcome.saved != null -> {
+                        _uiState.update { state ->
+                            state.copy(
+                                selectedSavedWishlistId = outcome.saved.id,
+                                activeTab = if (navigateToHub) NavTab.WISHLIST else state.activeTab,
+                                wishlistSubTab = if (navigateToHub) WishlistHubTab.INCOMING else state.wishlistSubTab,
+                                composerPreset = if (navigateToHub) null else state.composerPreset
+                            )
+                        }
+                        showMessage(
+                            if (outcome.updatedExisting) "Updated \"${outcome.saved.title}\" in Shared With Me"
+                            else "Saved \"${outcome.saved.title}\" to Shared With Me!"
+                        )
+                    }
+                }
+            }
+            closeSaveWishlistSheet()
+            onFinished()
+        }
+    }
+
+    fun deleteSavedWishlistWithUndo(id: String) {
+        val removed = repository.deleteSavedWishlist(id) ?: return
+        if (_uiState.value.selectedSavedWishlistId == id) {
+            val nextId = dataset.value.savedWishlists.firstOrNull()?.id
+            _uiState.update { it.copy(selectedSavedWishlistId = nextId) }
+        }
+        showMessage("Removed \"${removed.title}\"", actionLabel = "Undo") {
+            repository.restoreSavedWishlist(removed)
+            _uiState.update { it.copy(selectedSavedWishlistId = removed.id) }
+        }
+    }
+
+    fun claimOrResearchPublicWish(
+        shareId: String,
+        projectKey: String?,
+        wishId: String,
+        giverName: String,
+        claimImmediately: Boolean,
+        ownerDisplay: String
+    ) {
+        viewModelScope.launch {
+            val cleanName = giverName.trim()
+            if (cleanName.isBlank()) return@launch
+            repository.setGiverDisplayName(cleanName)
+            val (viewerApp, _) = repository.resolveViewerAppAndUid(projectKey)
+            if (viewerApp == null) {
+                showMessage("Connect Firebase Cloud Sync to update claims")
+                return@launch
+            }
+            val token = repository.localStorage.ensureClaimerToken()
+            runCatching {
+                if (claimImmediately) {
+                    val (ok, other) = repository.firebaseManager.claimPublicWishItem(
+                        viewerApp = viewerApp,
+                        shareId = shareId,
+                        claim = SharedWishClaim(
+                            wishId = wishId,
+                            claimedBy = cleanName,
+                            claimerToken = token,
+                            purchased = false,
+                            status = "reserved",
+                            researchers = listOf(cleanName),
+                            researcherTokens = listOf(token),
+                            claimedAt = Instant.now().toString()
+                        )
+                    )
+                    if (!ok) showMessage("Heads up — ${other ?: "someone else"} just claimed this item!")
+                    else showMessage("Claimed! Strictly hidden from $ownerDisplay.")
+                } else {
+                    val (ok, other) = repository.firebaseManager.setWishResearching(
+                        viewerApp = viewerApp,
+                        shareId = shareId,
+                        wishId = wishId,
+                        researcherName = cleanName,
+                        researcherToken = token
+                    )
+                    if (!ok) showMessage("Already claimed by ${other ?: "someone else"}.")
+                    else showMessage("Marked as Researching (hidden from $ownerDisplay).")
+                }
+            }.onFailure { err ->
+                showMessage(err.localizedMessage ?: "Failed to update claim")
+            }
+        }
+    }
+
+    fun togglePurchasedOnPublicWish(
+        shareId: String,
+        projectKey: String?,
+        existingClaim: SharedWishClaim
+    ) {
+        viewModelScope.launch {
+            val (viewerApp, _) = repository.resolveViewerAppAndUid(projectKey)
+            if (viewerApp == null) return@launch
+            val nextPurchased = !existingClaim.purchased
+            runCatching {
+                repository.firebaseManager.updatePublicWishClaim(
+                    viewerApp = viewerApp,
+                    shareId = shareId,
+                    wishId = existingClaim.wishId,
+                    existing = existingClaim,
+                    purchased = nextPurchased,
+                    status = if (nextPurchased) "purchased" else "reserved"
+                )
+                showMessage(if (nextPurchased) "Marked as Purchased!" else "Marked as Reserved")
+            }.onFailure { err ->
+                showMessage(err.localizedMessage ?: "Failed to update claim")
+            }
+        }
+    }
+
+    fun saveGiverNoteOnPublicWish(
+        shareId: String,
+        projectKey: String?,
+        existingClaim: SharedWishClaim,
+        note: String,
+        onSaved: () -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            val (viewerApp, _) = repository.resolveViewerAppAndUid(projectKey)
+            if (viewerApp == null) return@launch
+            runCatching {
+                repository.firebaseManager.updatePublicWishClaim(
+                    viewerApp = viewerApp,
+                    shareId = shareId,
+                    wishId = existingClaim.wishId,
+                    existing = existingClaim,
+                    giverNote = note
+                )
+                showMessage("Saved secret note for other gift-givers!")
+                onSaved()
+            }.onFailure { err ->
+                showMessage(err.localizedMessage ?: "Failed to save note")
+            }
+        }
+    }
+
+    fun releasePublicWishClaim(
+        shareId: String,
+        projectKey: String?,
+        wishId: String
+    ) {
+        viewModelScope.launch {
+            val (viewerApp, _) = repository.resolveViewerAppAndUid(projectKey)
+            if (viewerApp == null) return@launch
+            val token = repository.localStorage.ensureClaimerToken()
+            runCatching {
+                repository.firebaseManager.unclaimOrStopResearchingPublicWishItem(
+                    viewerApp = viewerApp,
+                    shareId = shareId,
+                    wishId = wishId,
+                    claimerToken = token
+                )
+                showMessage("Released claim on wishlist item")
+            }.onFailure { err ->
+                showMessage(err.localizedMessage ?: "Failed to release claim")
+            }
+        }
+    }
+
+    fun addSharedWishToTracker(
+        wish: PublishedWishItem,
+        shareId: String,
+        projectKey: String?,
+        ownerName: String,
+        personMode: String, // "existing" | "create" | "unassigned"
+        selectedPersonId: String?,
+        eventId: String?, // null = Ideas
+        giverName: String,
+        claimImmediately: Boolean,
+        onDone: () -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            val cleanGiver = giverName.trim()
+            if (cleanGiver.isBlank()) return@launch
+            repository.setGiverDisplayName(cleanGiver)
+            val token = repository.localStorage.ensureClaimerToken()
+
+            val finalPersonId = when (personMode) {
+                "create" -> {
+                    val created = repository.addPerson(
+                        name = ownerName.trim().ifBlank { "Friend" },
+                        budget = 0.0,
+                        relationship = "Friend or Family",
+                        birthday = null,
+                        sizes = ClothingSizes(),
+                        notes = "Added from shared wishlist",
+                        avatarShape = null,
+                        avatarTone = null
+                    )
+                    created.id
+                }
+                "existing" -> selectedPersonId?.takeIf { it.isNotBlank() }
+                else -> null
+            }
+
+            val (viewerApp, _) = repository.resolveViewerAppAndUid(projectKey)
+            val syncStatus = if (claimImmediately) "reserved" else "researching"
+            if (viewerApp != null) {
+                runCatching {
+                    if (claimImmediately) {
+                        val (ok, other) = repository.firebaseManager.claimPublicWishItem(
+                            viewerApp = viewerApp,
+                            shareId = shareId,
+                            claim = SharedWishClaim(
+                                wishId = wish.id,
+                                claimedBy = cleanGiver,
+                                claimerToken = token,
+                                purchased = false,
+                                status = "reserved",
+                                researchers = listOf(cleanGiver),
+                                researcherTokens = listOf(token),
+                                claimedAt = Instant.now().toString()
+                            )
+                        )
+                        if (!ok) {
+                            showMessage("Note: ${other ?: "someone else"} just claimed this, saved to your tracker.")
+                        }
+                    } else {
+                        repository.firebaseManager.setWishResearching(
+                            viewerApp = viewerApp,
+                            shareId = shareId,
+                            wishId = wish.id,
+                            researcherName = cleanGiver,
+                            researcherToken = token
+                        )
+                    }
+                }
+            }
+
+            repository.addGift(
+                GiftItem(
+                    id = "draft",
+                    title = wish.title,
+                    personId = finalPersonId,
+                    eventId = eventId,
+                    cost = 0.0,
+                    store = if (wish.url.isNotBlank()) LinkScraper.inferStoreFromUrl(wish.url) else "",
+                    url = wish.url,
+                    notes = wish.notes,
+                    bought = false,
+                    received = false,
+                    wrapped = false,
+                    saveForLater = false,
+                    sourceWishlistShareId = shareId,
+                    sourceWishId = wish.id,
+                    sourceWishlistKey = projectKey,
+                    sourceSyncStatus = syncStatus
+                )
+            )
+            showMessage("Added \"${wish.title}\" to your Gift Tracker!")
+            onDone()
         }
     }
 

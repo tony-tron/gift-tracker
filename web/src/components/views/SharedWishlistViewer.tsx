@@ -5,6 +5,7 @@ import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { onAuthStateChanged } from 'firebase/auth';
 import {
   ArrowLeft,
+  Bookmark,
   Check,
   ExternalLink,
   EyeOff,
@@ -41,7 +42,7 @@ export function SharedWishlistViewer() {
   const params = useParams<{ shareId: string }>();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { colorMode, setColorMode, gifts } = useGiftStore();
+  const { colorMode, setColorMode, gifts, savedWishlists, addSavedWishlist } = useGiftStore();
 
   const shareId = typeof params?.shareId === 'string' ? params.shareId : '';
   const fallbackKey = searchParams.get('k') || searchParams.get('pair');
@@ -536,7 +537,57 @@ export function SharedWishlistViewer() {
             )}
           </div>
 
-          <h1 style={{ fontSize: '24px', fontWeight: 800, lineHeight: 1.2 }}>{wishlist.title}</h1>
+          <div
+            style={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '10px',
+            }}
+          >
+            <h1 style={{ fontSize: '24px', fontWeight: 800, lineHeight: 1.2 }}>{wishlist.title}</h1>
+
+            {!isOwnerPreview && (
+              <div>
+                {savedWishlists.some((sw) => sw.shareId === shareId) ? (
+                  <button
+                    type="button"
+                    onClick={() => router.push('/?tab=wishlist&sub=incoming')}
+                    className="m3-btn-tonal"
+                    style={{ height: '36px', fontSize: '12.5px' }}
+                  >
+                    <Check size={14} /> Saved in Wishlists — Open Hub →
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const currentUrl =
+                        typeof window !== 'undefined'
+                          ? window.location.href
+                          : `/w/${encodeURIComponent(shareId)}${
+                              fallbackKey ? `?k=${encodeURIComponent(fallbackKey)}` : ''
+                            }`;
+                      void addSavedWishlist({
+                        url: currentUrl,
+                        title: wishlist.title,
+                        ownerName: wishlist.ownerName || '',
+                      }).then((saved) => {
+                        if (saved) {
+                          showToast('Saved to Shared With Me in your Gift Tracker!');
+                        }
+                      });
+                    }}
+                    className="m3-btn-filled"
+                    style={{ height: '36px', fontSize: '12.5px' }}
+                  >
+                    <Bookmark size={14} /> Save to My Wishlists
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
 
           <p
             style={{

@@ -31,4 +31,5 @@ export const EMPTY_DATASET: GiftDataset = {
   gifts: [],
   wishes: [],
   sharedLinks: [],
+  savedWishlists: [],
 };

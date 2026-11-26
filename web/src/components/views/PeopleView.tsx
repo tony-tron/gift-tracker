@@ -8,7 +8,9 @@ import {
   ChevronDown,
   ChevronUp,
   Clock,
+  ExternalLink,
   GripVertical,
+  Inbox,
   Pencil,
   Plus,
   Ruler,
@@ -18,6 +20,7 @@ import {
 } from 'lucide-react';
 import { useGiftStore } from '@/context/GiftStoreContext';
 import { ExpressiveProgress } from '@/components/ui/ExpressiveProgress';
+import { SaveWishlistSheet } from '@/components/modals/SaveWishlistSheet';
 import type { GiftItem, Person } from '@/lib/types';
 
 export type PeopleSortOption =
@@ -43,8 +46,10 @@ export function PeopleView({
     people,
     events,
     gifts,
+    savedWishlists,
     selectedPersonId,
     setSelectedPersonId,
+    openSavedWishlistInHub,
     updatePerson,
     moveGiftToEvent,
     reorderPeople,
@@ -57,18 +62,19 @@ export function PeopleView({
   const [draggedPersonId, setDraggedPersonId] = useState<string | null>(null);
   const [dragOverPersonId, setDragOverPersonId] = useState<string | null>(null);
   const [dropPosition, setDropPosition] = useState<'before' | 'after'>('after');
+  const [saveWishlistForPersonId, setSaveWishlistForPersonId] = useState<string | null>(null);
 
   const eventMap = useMemo(() => new Map(events.map((e) => [e.id, e])), [events]);
 
   // Per-person quick stats
   const personStatsMap = useMemo(() => {
-    const map = new Map<string, { xmasSpent: number; ideasCount: number }>();
+    const map = new Map<string, { xmasSpent: number; ideasCount: number; wishlistsCount: number }>();
     for (const p of people) {
-      map.set(p.id, { xmasSpent: 0, ideasCount: 0 });
+      map.set(p.id, { xmasSpent: 0, ideasCount: 0, wishlistsCount: 0 });
     }
     for (const g of gifts) {
       if (!g.personId) continue;
-      const entry = map.get(g.personId) || { xmasSpent: 0, ideasCount: 0 };
+      const entry = map.get(g.personId) || { xmasSpent: 0, ideasCount: 0, wishlistsCount: 0 };
       if (g.eventId === '2026-christmas') {
         entry.xmasSpent += g.cost || 0;
       } else if (g.eventId === null) {
@@ -76,8 +82,14 @@ export function PeopleView({
       }
       map.set(g.personId, entry);
     }
+    for (const sw of savedWishlists) {
+      if (!sw.personId) continue;
+      const entry = map.get(sw.personId) || { xmasSpent: 0, ideasCount: 0, wishlistsCount: 0 };
+      entry.wishlistsCount += 1;
+      map.set(sw.personId, entry);
+    }
     return map;
-  }, [people, gifts]);
+  }, [people, gifts, savedWishlists]);
 
   const filteredPeople = useMemo(() => {
     let list = [...people];
@@ -214,14 +226,17 @@ export function PeopleView({
       .reduce((acc, g) => acc + (g.cost || 0), 0);
     const ideasValue = ideas.reduce((acc, g) => acc + (g.cost || 0), 0);
 
+    const linkedWishlists = savedWishlists.filter((sw) => sw.personId === activePerson.id);
+
     return {
       ideas,
       active2026,
       pastHistory,
       xmasSpent,
       ideasValue,
+      linkedWishlists,
     };
-  }, [activePerson, gifts, eventMap]);
+  }, [activePerson, gifts, eventMap, savedWishlists]);
 
   return (
     <div className="canonical-list-detail">
@@ -345,7 +360,11 @@ export function PeopleView({
             const isOver = dragOverPersonId === person.id;
             const canDrag = sortOption === 'default' && !searchQuery.trim();
 
-            const st = personStatsMap.get(person.id) || { xmasSpent: 0, ideasCount: 0 };
+            const st = personStatsMap.get(person.id) || {
+              xmasSpent: 0,
+              ideasCount: 0,
+              wishlistsCount: 0,
+            };
             const sizeSummary = [
               person.sizes?.top ? `Top ${person.sizes.top}` : null,
               person.sizes?.bottoms ? `Bot ${person.sizes.bottoms}` : null,
@@ -435,6 +454,9 @@ export function PeopleView({
                     >
                       {sizeSummary || person.relationship}
                       {st.ideasCount > 0 ? ` • ${st.ideasCount} ideas` : ''}
+                      {st.wishlistsCount > 0
+                        ? ` • ${st.wishlistsCount} ${st.wishlistsCount === 1 ? 'wishlist' : 'wishlists'}`
+                        : ''}
                     </div>
                   </div>
                 </div>
@@ -676,6 +698,125 @@ export function PeopleView({
             </section>
           </div>
 
+          {/* Shared Wishlists Linked to This Person */}
+          <section className="m3-surface-card">
+            <div
+              style={{
+                display: 'flex',
+                flexWrap: 'wrap',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '8px',
+                marginBottom: '12px',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 700 }}>
+                <Inbox size={16} style={{ color: 'var(--md-primary)' }} />
+                <span>Shared Wishlists ({activePersonData.linkedWishlists.length})</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSaveWishlistForPersonId(activePerson.id)}
+                className="m3-btn-tonal"
+                style={{ height: '32px', fontSize: '12px', padding: '0 12px' }}
+              >
+                <Plus size={14} /> Save Wishlist
+              </button>
+            </div>
+
+            {activePersonData.linkedWishlists.length === 0 ? (
+              <p style={{ fontSize: '13px', color: 'var(--md-on-surface-variant)' }}>
+                No wishlists saved for {activePerson.name} yet. Tap <strong>Save Wishlist</strong>{' '}
+                to bookmark their Gift Tracker <code>/w/...</code> link or external registry.
+              </p>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {activePersonData.linkedWishlists.map((sw) => (
+                  <div
+                    key={sw.id}
+                    style={{
+                      background: 'var(--md-surface-container-low)',
+                      borderRadius: '16px',
+                      padding: '10px 14px',
+                      display: 'flex',
+                      flexWrap: 'wrap',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: '10px',
+                    }}
+                  >
+                    <div style={{ minWidth: 0, flex: '1 1 180px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span style={{ fontWeight: 700, fontSize: '14px' }}>{sw.title}</span>
+                        <span
+                          style={{
+                            fontSize: '10.5px',
+                            fontWeight: 700,
+                            padding: '2px 7px',
+                            borderRadius: '999px',
+                            background:
+                              sw.type === 'live'
+                                ? 'var(--md-success-container)'
+                                : 'var(--md-secondary-container)',
+                            color:
+                              sw.type === 'live'
+                                ? 'var(--md-on-success-container)'
+                                : 'var(--md-on-secondary-container)',
+                          }}
+                        >
+                          {sw.type === 'live' ? '● Live Synced' : 'External'}
+                        </span>
+                      </div>
+                      {sw.notes && (
+                        <div style={{ fontSize: '12px', color: 'var(--md-on-surface-variant)' }}>
+                          {sw.notes}
+                        </div>
+                      )}
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      {sw.type === 'live' ? (
+                        <button
+                          type="button"
+                          onClick={() => openSavedWishlistInHub(sw.id)}
+                          className="m3-btn-filled"
+                          style={{ height: '32px', fontSize: '12px', padding: '0 12px' }}
+                        >
+                          Browse &amp; Claim <ArrowRight size={13} />
+                        </button>
+                      ) : (
+                        <>
+                          <a
+                            href={sw.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="m3-btn-tonal"
+                            style={{
+                              height: '32px',
+                              fontSize: '12px',
+                              padding: '0 12px',
+                              textDecoration: 'none',
+                            }}
+                          >
+                            <ExternalLink size={13} /> Open List
+                          </a>
+                          <button
+                            type="button"
+                            onClick={() => openSavedWishlistInHub(sw.id)}
+                            className="m3-btn-text"
+                            style={{ height: '32px', fontSize: '12px' }}
+                          >
+                            Hub →
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+
           {/* Gift Ideas Backlog for this Person */}
           <section className="m3-surface-card">
             <div
@@ -796,6 +937,12 @@ export function PeopleView({
           </section>
         </div>
       )}
+
+      <SaveWishlistSheet
+        open={Boolean(saveWishlistForPersonId)}
+        defaultPersonId={saveWishlistForPersonId}
+        onClose={() => setSaveWishlistForPersonId(null)}
+      />
     </div>
   );
 }

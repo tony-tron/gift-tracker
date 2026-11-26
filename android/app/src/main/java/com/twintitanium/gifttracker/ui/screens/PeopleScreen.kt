@@ -21,11 +21,13 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Checkroom
 import androidx.compose.material.icons.rounded.DragHandle
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.History
+import androidx.compose.material.icons.rounded.Inbox
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material.icons.rounded.PersonAdd
@@ -44,6 +46,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -55,6 +58,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -287,6 +291,7 @@ fun PeopleScreen(
                         .filter { it.personId == person.id && it.eventId == "2026-christmas" }
                         .sumOf { it.cost }
                     val ideasCount = dataset.gifts.count { it.personId == person.id && it.eventId == null }
+                    val wishlistsCount = dataset.savedWishlists.count { it.personId == person.id }
 
                     var showContextMenu by remember { mutableStateOf(false) }
 
@@ -347,6 +352,9 @@ fun PeopleScreen(
                                         val sub = buildList {
                                             add(person.relationship)
                                             if (ideasCount > 0) add("$ideasCount ideas")
+                                            if (wishlistsCount > 0) {
+                                                add("$wishlistsCount ${if (wishlistsCount == 1) "wishlist" else "wishlists"}")
+                                            }
                                         }.joinToString(" • ")
                                         Text(
                                             sub,
@@ -432,6 +440,13 @@ fun PeopleScreen(
                                 }
                             )
                             DropdownMenuItem(
+                                text = { Text("Save Wishlist for ${person.name}") },
+                                onClick = {
+                                    showContextMenu = false
+                                    viewModel.openSaveWishlistSheet(defaultPersonId = person.id)
+                                }
+                            )
+                            DropdownMenuItem(
                                 text = { Text("Edit Person") },
                                 onClick = {
                                     showContextMenu = false
@@ -447,8 +462,12 @@ fun PeopleScreen(
 
     @Composable
     fun DetailPane(person: Person, modifier: Modifier = Modifier) {
+        val uriHandler = LocalUriHandler.current
         val personGifts = remember(dataset.gifts, person.id) {
             dataset.gifts.filter { it.personId == person.id }
+        }
+        val linkedWishlists = remember(dataset.savedWishlists, person.id) {
+            dataset.savedWishlists.filter { it.personId == person.id }
         }
         val activeGifts = personGifts.filter { it.eventId != null && eventMap[it.eventId]?.isArchived != true }
         val ideas = personGifts.filter { it.eventId == null }
@@ -612,6 +631,103 @@ fun PeopleScreen(
                         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             Text("Interests & Notes", style = MaterialTheme.typography.titleMedium)
                             Text(person.notes, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+            }
+
+            // Shared Wishlists Linked to This Person
+            item {
+                Card(
+                    shape = RoundedCornerShape(24.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    Icons.Rounded.Inbox,
+                                    null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Text(
+                                    "Shared Wishlists (${linkedWishlists.size})",
+                                    style = MaterialTheme.typography.titleMedium
+                                )
+                            }
+                            FilledTonalButton(
+                                onClick = { viewModel.openSaveWishlistSheet(defaultPersonId = person.id) },
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                            ) {
+                                Icon(Icons.Rounded.Add, null, Modifier.size(15.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("Save Wishlist", fontSize = 12.sp)
+                            }
+                        }
+
+                        if (linkedWishlists.isEmpty()) {
+                            Text(
+                                "No wishlists saved for ${person.name} yet. Tap Save Wishlist to bookmark their /w/... link or external registry.",
+                                fontSize = 13.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        } else {
+                            linkedWishlists.forEach { sw ->
+                                Surface(
+                                    shape = RoundedCornerShape(14.dp),
+                                    color = MaterialTheme.colorScheme.surfaceContainerLow
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(12.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(sw.title, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                                            Text(
+                                                if (sw.type == "live") "● Live Synced Checklist" else "External Registry",
+                                                fontSize = 12.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                        if (sw.type == "live") {
+                                            Button(
+                                                onClick = { viewModel.openSavedWishlistInHub(sw.id) },
+                                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                                            ) {
+                                                Text("Browse & Claim", fontSize = 12.sp)
+                                            }
+                                        } else {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                FilledTonalButton(
+                                                    onClick = { runCatching { uriHandler.openUri(sw.url) } },
+                                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                                                ) {
+                                                    Icon(Icons.AutoMirrored.Rounded.OpenInNew, null, Modifier.size(14.dp))
+                                                    Spacer(Modifier.width(4.dp))
+                                                    Text("Open", fontSize = 12.sp)
+                                                }
+                                                TextButton(onClick = { viewModel.openSavedWishlistInHub(sw.id) }) {
+                                                    Text("Hub →", fontSize = 12.sp)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }

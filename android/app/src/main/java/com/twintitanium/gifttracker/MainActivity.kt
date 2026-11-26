@@ -58,7 +58,7 @@ class MainActivity : ComponentActivity() {
             KeyboardShortcutInfo("Occasions Tab", KeyEvent.KEYCODE_1, KeyEvent.META_CTRL_ON),
             KeyboardShortcutInfo("Ideas Tab", KeyEvent.KEYCODE_2, KeyEvent.META_CTRL_ON),
             KeyboardShortcutInfo("People Tab", KeyEvent.KEYCODE_3, KeyEvent.META_CTRL_ON),
-            KeyboardShortcutInfo("Wishlist Tab", KeyEvent.KEYCODE_4, KeyEvent.META_CTRL_ON)
+            KeyboardShortcutInfo("Wishlists Tab", KeyEvent.KEYCODE_4, KeyEvent.META_CTRL_ON)
         )
         data?.add(KeyboardShortcutGroup("Gift Tracker", shortcuts))
     }

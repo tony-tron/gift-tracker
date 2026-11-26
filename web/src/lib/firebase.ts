@@ -18,6 +18,7 @@ import {
   collection,
   doc,
   setDoc,
+  getDoc,
   deleteDoc,
   onSnapshot,
   writeBatch,
@@ -35,6 +36,7 @@ import type {
   Person,
   PublishedWishItem,
   PublicSharedWishlistDoc,
+  SavedWishlist,
   SharedWishClaim,
   SharedWishlistLink,
   WishItem,
@@ -443,6 +445,7 @@ export async function uploadFullDatasetToFirestore(
     ...dataset.gifts.map((g) => ({ col: 'gifts', id: g.id, data: g })),
     ...dataset.wishes.map((w) => ({ col: 'wishes', id: w.id, data: w })),
     ...(dataset.sharedLinks ?? []).map((s) => ({ col: 'shared_links', id: s.id, data: s })),
+    ...(dataset.savedWishlists ?? []).map((sw) => ({ col: 'saved_wishlists', id: sw.id, data: sw })),
   ];
 
   const chunkSize = 400;
@@ -458,9 +461,9 @@ export async function uploadFullDatasetToFirestore(
 }
 
 export async function upsertRemoteDoc(
-  colName: 'people' | 'events' | 'gifts' | 'wishes' | 'shared_links',
+  colName: 'people' | 'events' | 'gifts' | 'wishes' | 'shared_links' | 'saved_wishlists',
   id: string,
-  data: Person | GiftEvent | GiftItem | WishItem | SharedWishlistLink,
+  data: Person | GiftEvent | GiftItem | WishItem | SharedWishlistLink | SavedWishlist,
   namespaceId: string
 ): Promise<void> {
   const services = initFirebaseServices();
@@ -470,7 +473,7 @@ export async function upsertRemoteDoc(
 }
 
 export async function deleteRemoteDoc(
-  colName: 'people' | 'events' | 'gifts' | 'wishes' | 'shared_links',
+  colName: 'people' | 'events' | 'gifts' | 'wishes' | 'shared_links' | 'saved_wishlists',
   id: string,
   namespaceId: string
 ): Promise<void> {
@@ -489,6 +492,7 @@ export function subscribeToWorkspace(
     onGifts: (items: GiftItem[]) => void;
     onWishes: (items: WishItem[]) => void;
     onSharedLinks?: (items: SharedWishlistLink[]) => void;
+    onSavedWishlists?: (items: SavedWishlist[]) => void;
     onError?: (err: Error) => void;
   }
 ): Unsubscribe {
@@ -556,6 +560,24 @@ export function subscribeToWorkspace(
             .map((d) => d.data() as SharedWishlistLink)
             .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
           onLinks(items);
+        },
+        (err) => handlers.onError?.(err)
+      )
+    );
+  }
+
+  if (handlers.onSavedWishlists) {
+    const onSaved = handlers.onSavedWishlists;
+    unsubs.push(
+      onSnapshot(
+        collection(db, 'workspaces', namespaceId, 'saved_wishlists'),
+        (snap) => {
+          const items = snap.docs
+            .map((d) => d.data() as SavedWishlist)
+            .sort((a, b) =>
+              (b.updatedAt || b.createdAt || '').localeCompare(a.updatedAt || a.createdAt || '')
+            );
+          onSaved(items);
         },
         (err) => handlers.onError?.(err)
       )
@@ -745,6 +767,59 @@ export function subscribeToPublicWishlist(
     },
     (err) => onError?.(err)
   );
+}
+
+export function parseWishlistUrl(rawInput: string): {
+  normalizedUrl: string;
+  type: 'live' | 'external';
+  shareId?: string;
+  projectKey?: string;
+} {
+  let trimmed = rawInput.trim();
+  if (!trimmed) {
+    return { normalizedUrl: '', type: 'external' };
+  }
+
+  if (trimmed.startsWith('/w/')) {
+    const origin = getEffectiveOrigin();
+    trimmed = `${origin}${trimmed}`;
+  } else if (!/^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//.test(trimmed)) {
+    trimmed = `https://${trimmed}`;
+  }
+
+  try {
+    const parsed = new URL(trimmed);
+    const match = parsed.pathname.match(/\/w\/([A-Za-z0-9_-]+)/);
+    if (match && match[1]) {
+      const shareId = decodeURIComponent(match[1]);
+      const projectKey =
+        parsed.searchParams.get('k') || parsed.searchParams.get('pair') || undefined;
+      return {
+        normalizedUrl: parsed.toString(),
+        type: 'live',
+        shareId,
+        projectKey: projectKey?.trim() || undefined,
+      };
+    }
+    return { normalizedUrl: parsed.toString(), type: 'external' };
+  } catch {
+    return { normalizedUrl: trimmed, type: 'external' };
+  }
+}
+
+export async function fetchPublicWishlistOnce(
+  shareId: string,
+  fallbackKey?: string | null
+): Promise<PublicSharedWishlistDoc | null> {
+  const services = initPublicViewerServices(fallbackKey);
+  if (!services || !shareId) return null;
+  try {
+    const snap = await getDoc(doc(services.db, 'shared_wishlists', shareId));
+    if (!snap.exists()) return null;
+    return snap.data() as PublicSharedWishlistDoc;
+  } catch {
+    return null;
+  }
 }
 
 export const GIVER_NAME_KEY = 'gift_tracker_giver_name_v1';

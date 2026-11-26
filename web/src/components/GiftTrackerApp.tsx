@@ -117,16 +117,18 @@ export function GiftTrackerApp({ initialSharedDraft }: GiftTrackerAppProps) {
     }
     if (activeTab === 'ideas') return 'Gift Ideas & Stash';
     if (activeTab === 'people') return 'People & Sizes';
-    return 'My Wishlist';
+    return 'Wishlists';
   }, [activeTab, selectedEventId, events]);
 
   const openNewGiftModal = (defaults?: {
     personId?: string | null;
     eventId?: string | null;
+    url?: string;
   }) => {
     setEditingGift(null);
     setComposerDefaults({
       personId: defaults?.personId ?? null,
+      url: defaults?.url,
       eventId:
         defaults?.eventId !== undefined
           ? defaults.eventId
@@ -174,8 +176,8 @@ export function GiftTrackerApp({ initialSharedDraft }: GiftTrackerAppProps) {
     },
     {
       id: 'wishlist',
-      label: 'My Wishlist',
-      shortLabel: 'Me',
+      label: 'Wishlists',
+      shortLabel: 'Lists',
       count: counts.wishlist,
       icon: <Star size={20} />,
     },
@@ -324,7 +326,9 @@ export function GiftTrackerApp({ initialSharedDraft }: GiftTrackerAppProps) {
             />
           )}
 
-          {activeTab === 'wishlist' && <WishlistView />}
+          {activeTab === 'wishlist' && (
+            <WishlistView onOpenNewGift={(defs) => openNewGiftModal(defs)} />
+          )}
         </main>
       </div>
 
