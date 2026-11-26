@@ -146,6 +146,7 @@ fun GiftTrackerRoot(
 
     LaunchedEffect(viewModel) {
         viewModel.snackbarEvents.collect { event ->
+            if (viewModel.uiState.value.settingsOpen) return@collect
             val result = snackbarHostState.showSnackbar(
                 message = event.message,
                 actionLabel = event.actionLabel,

@@ -19,7 +19,7 @@ android {
         applicationId = "com.twintitanium.gifttracker"
         minSdk = 28
         targetSdk = 36
-        versionCode = 9
+        versionCode = 10
         versionName = "1.1.4"
 
         vectorDrawables {

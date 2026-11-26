@@ -51,11 +51,16 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -143,10 +148,25 @@ fun SettingsSheet(
         }
     }
 
+    val sheetSnackbarHostState = remember { SnackbarHostState() }
+    LaunchedEffect(viewModel) {
+        viewModel.snackbarEvents.collect { event ->
+            val result = sheetSnackbarHostState.showSnackbar(
+                message = event.message,
+                actionLabel = event.actionLabel,
+                duration = SnackbarDuration.Short
+            )
+            if (result == SnackbarResult.ActionPerformed) {
+                event.onAction?.invoke()
+            }
+        }
+    }
+
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState
     ) {
+        Box(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -307,7 +327,7 @@ fun SettingsSheet(
                         )
 
                         if (cloudState.userUid == null) {
-                            if (!cloudState.isFromGoogleServicesResource && cloudState.webClientId.isNullOrBlank()) {
+                            if (cloudState.webClientId.isNullOrBlank()) {
                                 OutlinedTextField(
                                     value = webClientIdInput,
                                     onValueChange = { webClientIdInput = it },
@@ -658,6 +678,13 @@ fun SettingsSheet(
                     }
                 }
             }
+        }
+            SnackbarHost(
+                hostState = sheetSnackbarHostState,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(horizontal = 16.dp, vertical = 12.dp)
+            )
         }
     }
 
