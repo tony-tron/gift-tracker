@@ -47,28 +47,70 @@ jobs:
           else
             echo "No ANDROID_KEYSTORE_BASE64 secret found; falling back to default debug key."
           fi
-      - name: Configure google-services.json (if secret is set)
-        run: |
-          if [ -n "${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}" ]; then
-            echo "${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}" | base64 --decode > app/google-services.json
-            echo "google-services.json decoded from base64 secret ($(wc -c < app/google-services.json) bytes)."
-          elif [ -n "${{ secrets.GOOGLE_SERVICES_JSON }}" ]; then
-            printf '%s' "${{ secrets.GOOGLE_SERVICES_JSON }}" > app/google-services.json
-            echo "google-services.json written from secret ($(wc -c < app/google-services.json) bytes)."
-          else
-            echo "No GOOGLE_SERVICES_JSON secret found; building clean APK with runtime/QR pairing support."
-          fi
-      - name: Build Release & Debug APKs + Release AAB
+      - name: Build Public Release & Debug APKs (no google-services.json)
         env:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: ./gradlew assembleDebug assembleRelease bundleRelease --no-daemon
-      - name: Upload Installable APK & AAB Artifacts
+        run: ./gradlew assembleDebug assembleRelease --no-daemon
+      - name: Upload Public Installable APK Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: gift-tracker-android-apk
           path: |
             android/app/build/outputs/apk/release/app-release.apk
             android/app/build/outputs/apk/debug/app-debug.apk
-            android/app/build/outputs/bundle/release/app-release.aab
+
+  build-play-aab:
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Accept Android SDK Licenses
+        run: yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
+      - name: Configure Release Keystore
+        run: |
+          if [ -z "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" ]; then
+            echo "ANDROID_KEYSTORE_BASE64 is not set; skipping Play AAB build."
+            exit 0
+          fi
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > "$RUNNER_TEMP/release.keystore"
+          echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
+      - name: Configure google-services.json
+        run: |
+          if [ -n "${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}" ]; then
+            echo "${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}" | base64 --decode > app/google-services.json
+          elif [ -n "${{ secrets.GOOGLE_SERVICES_JSON }}" ]; then
+            printf '%s' "${{ secrets.GOOGLE_SERVICES_JSON }}" > app/google-services.json
+          else
+            echo "No GOOGLE_SERVICES_JSON secret found; building AAB without baked-in Firebase config."
+          fi
+      - name: Build Signed Play Store AAB
+        if: env.ANDROID_KEYSTORE_PATH != ''
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: ./gradlew bundleRelease --no-daemon
+      - name: Upload AAB to Private Draft Release
+        if: env.ANDROID_KEYSTORE_PATH != ''
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="play-aab-latest"
+          AAB="android/app/build/outputs/bundle/release/app-release.aab"
+          gh release upload "$TAG" "$AAB" --clobber || \
+            gh release create "$TAG" "$AAB" --draft \
+              --title "Play Store AAB (Private Draft)" \
+              --notes "Private draft release for Google Play Console upload (only visible to repo maintainers)."
